@@ -10,10 +10,6 @@ from config import *
 from inference import ONNXPipeline
 
 import pytorch_auto_drive.functional as F
-from pytorch_auto_drive.utils import (
-    lane_as_segmentation_inference,
-    lane_detection_visualize_batched,
-)
 
 
 def run():
