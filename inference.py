@@ -39,6 +39,6 @@ class ONNXPipeline:
             return None, keypoints
 
         results = lane_detection_visualize_batched(
-            original_img, keypoints=keypoints, style="line"
+            original_img, keypoints=keypoints, style="point"
         )
         return results, keypoints

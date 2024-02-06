@@ -97,7 +97,7 @@ if __name__ == "__main__":
         # map_config=create_map(),
         map_config=map_config,
         # map=4,  # seven block
-        num_scenarios=10,
+        num_scenarios=1,
         decision_repeat=1,
         # physics_world_step_size=self.TICKS_PER_FRAME / 100,
         # preload_models=False,
@@ -175,7 +175,7 @@ if __name__ == "__main__":
 
             # cv2.waitKey(1)
 
-            if (tm or tc) and info["arrive_dest"]:
+            if (tm or tc) and info["arrive_dest"] and env.current_seed + 1 < env.config["start_seed"] + env.config["num_scenarios"]:
                 env.reset(env.current_seed + 1)
                 env.current_track_agent.expert_takeover = True
     finally:
