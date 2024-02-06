@@ -27,33 +27,26 @@ import pytorch_auto_drive.functional as F
 
 W, H = 1280, 720  #  Desired output size of annotated images
 
-SAVE_IMAGES = False
+SAVE_IMAGES = True
+HEADLESS = True
+STEPS = 20 * 300
 
+print(f"Using CUDA: {_cuda_enable}")
+print(f"Headless mode: {HEADLESS}")
 
-class CopyRamRGBCamera(RGBCamera):
-    """Camera which copies its content into RAM during the render process, for faster image grabbing."""
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.cpu_texture = Texture()
-        self.buffer.addRenderTexture(self.cpu_texture, GraphicsOutput.RTMCopyRam)
-
-    def get_rgb_array_cpu(self):
-        origin_img = self.cpu_texture
-        img = np.frombuffer(origin_img.getRamImage().getData(), dtype=np.uint8)
-        img = img.reshape((origin_img.getYSize(), origin_img.getXSize(), -1))
-        img = img[:, :, :3]  # RGBA to RGB
-        # img = np.swapaxes(img, 1, 0)
-        img = img[::-1]  # Flip on vertical axis
-        return img
-
-
-class RGBCameraRoad(CopyRamRGBCamera):
-    def __init__(self, *args, **kwargs):
-        super(RGBCameraRoad, self).__init__(*args, **kwargs)
-        # lens = self.get_lens()
-        # lens.setFov(40)
-        # lens.setNear(0.1)
+def dummy_env():
+    env = MetaDriveEnv({"use_render": False, "image_observation": False})
+    try:
+        env.reset()
+        for i in range(1, 100):
+            o, r, tm, tc, info = env.step([0, 1])
+    except:
+        print("Error happens in Bullet physics world !")
+        sys.exit()
+    else:
+        print("Bullet physics world is launched successfully!")
+    finally:
+        env.close()
 
 # from https://metadrive-simulator.readthedocs.io/en/latest/points_and_lines.html#points 
 def make_line(x_offset, height, y_dir=1, color=(1,105/255,180/255)):
@@ -74,6 +67,7 @@ def draw_keypoints(drawer, keypoints):
 
 if __name__ == "__main__":
     # Adapted from OpenPilot's bridge
+    inference_pipeline = ONNXPipeline()
 
     map_config = {
         "config": "SSCrSCS",
@@ -84,21 +78,17 @@ if __name__ == "__main__":
     }
 
     config = dict(
-        use_render=True,
-        vehicle_config=dict(
-            enable_reverse=False,
-            image_source="rgb_road",
-        ),
-        sensors={
-            "rgb_road": (
-                RGBCameraRoad,
-                W,
-                H,
-            )
+        use_render=not HEADLESS,
+        window_size=(W, H),
+         sensors={
+            "rgb_camera": (RGBCamera, W, H),
         },
-        image_on_cuda=_cuda_enable,
-        image_observation=True,
         interface_panel=[],
+        vehicle_config={
+            "image_source": "rgb_camera",
+        },
+        image_on_cuda=False,
+        image_observation=True,       
         out_of_route_done=False,
         on_continuous_line_done=False,
         crash_vehicle_done=False,
@@ -114,34 +104,37 @@ if __name__ == "__main__":
         manual_control=True,
     )
 
+    dummy_env()
+
     env = MetaDriveEnv(config)
+
     try:
-        o, _ = env.reset()
+        env.reset()
+        for i in range(10):
+            o, r, tm, tc, i = env.step([0, 1])
+        assert isinstance(o, dict)
         point_drawer = env.engine.make_point_drawer(scale=1) # create a point drawer
         print(HELP_MESSAGE)
-        env.vehicle.expert_takeover = True
 
-        assert isinstance(o, dict)
-        print(
-            "The observation is a dict with numpy arrays as values: ",
-            {k: v.shape for k, v in o.items()},
-        )
+        env.agent.expert_takeover = True
 
-        for i in range(1, 1000000000):
+        for i in range(1, STEPS):
             o, r, tm, tc, info = env.step([0, 0])
             
-            env.render(
-                text={
-                    "Auto-Drive (Switch mode: T)": (
-                        "on" if env.current_track_agent.expert_takeover else "off"
-                    ),
-                    "Keyboard Control": "W,A,S,D",
-                }
-            )
+            if not HEADLESS:
+                env.render(
+                    text={
+                        "Auto-Drive (Switch mode: T)": (
+                            "on" if env.current_track_agent.expert_takeover else "off"
+                        ),
+                        "Keyboard Control": "W,A,S,D",
+                        }
+                )
 
             try:
                 if i % 20 == 0:
-                    image = Image.fromarray(cv2.cvtColor((o["image"][..., -1]*255).astype(np.uint8), cv2.COLOR_BGR2RGB))
+                    # image = Image.fromarray(cv2.cvtColor((o["image"][..., -1]*255).astype(np.uint8), cv2.COLOR_BGR2RGB))
+                    image = Image.fromarray((o["image"][..., -1]*255).astype(np.uint8))
                     orig_sizes = (image.height, image.width)
                     original_img = F.to_tensor(image).clone().unsqueeze(0)
                     image = F.resize(image, size=input_sizes)
@@ -153,23 +146,20 @@ if __name__ == "__main__":
                         model_in.permute((2, 0, 1)).contiguous().float().div(255).unsqueeze(0).numpy()
                     )
 
-                    pipeline = ONNXPipeline()
-                    results, keypoints = pipeline.inference(model_in, original_img, orig_sizes)
+                    results, keypoints = inference_pipeline.inference(model_in, original_img, orig_sizes)
 
                     # TODO: visualize keypoints: https://metadrive-simulator.readthedocs.io/en/latest/points_and_lines.html#points 
                     # draw_keypoints(point_drawer, keypoints)
 
                     # cv2.imshow("Inferred image", results[0])
-                    cv2.imwrite(
-                            f"camera_observations/{str(i)}.jpg",
-                            results[0] * 255,
+                    if SAVE_IMAGES:
+                        cv2.imwrite(
+                                f"camera_observations/{str(i)}_inf.jpg",
+                                results[0],
                         )
 
-            except Exception as e: # work on python 3.x
+            except Exception as e:
                 print(e)
-
-            # Show the last RGB image in the observation
-            # cv2.imshow("RGB Image in Observation", o["image"][..., -1])
 
             if SAVE_IMAGES:
                 if i % 20 == 0:
