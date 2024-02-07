@@ -20,7 +20,7 @@ from metadrive.component.sensors.base_camera import _cuda_enable
 from metadrive.component.map.pg_map import MapGenerateMethod
 
 import torch
-from inference import ONNXPipeline
+from inference.inference import ONNXPipeline
 from config import *
 from PIL import Image
 import pytorch_auto_drive.functional as F
@@ -33,6 +33,7 @@ STEPS = 20 * 300
 
 print(f"Using CUDA: {_cuda_enable}")
 print(f"Headless mode: {HEADLESS}")
+
 
 def dummy_env():
     env = MetaDriveEnv({"use_render": False, "image_observation": False})
@@ -48,22 +49,27 @@ def dummy_env():
     finally:
         env.close()
 
-# from https://metadrive-simulator.readthedocs.io/en/latest/points_and_lines.html#points 
-def make_line(x_offset, height, y_dir=1, color=(1,105/255,180/255)):
-    points = [(x_offset+x,x*y_dir,height*x/10+height) for x in range(10)]
-    colors = [np.clip(np.array([*color,1])*(i+1)/11, 0., 1.0) for i in range(10)]
-    if y_dir<0:
+
+# from https://metadrive-simulator.readthedocs.io/en/latest/points_and_lines.html#points
+def make_line(x_offset, height, y_dir=1, color=(1, 105 / 255, 180 / 255)):
+    points = [(x_offset + x, x * y_dir, height * x / 10 + height) for x in range(10)]
+    colors = [
+        np.clip(np.array([*color, 1]) * (i + 1) / 11, 0.0, 1.0) for i in range(10)
+    ]
+    if y_dir < 0:
         points = points[::-1]
         colors = colors[::-1]
     return points, colors
 
+
 def draw_keypoints(drawer, keypoints):
-    line_1, color_1 = make_line(6, 0.5, 0.01*i) # define line 1 for test
-    line_2, color_2 = make_line(6, 0.5, -0.01*i) # define line 2 for test
-    points = line_1 + line_2 # create point list
-    colors = color_1+ color_2
+    line_1, color_1 = make_line(6, 0.5, 0.01 * i)  # define line 1 for test
+    line_2, color_2 = make_line(6, 0.5, -0.01 * i)  # define line 2 for test
+    points = line_1 + line_2  # create point list
+    colors = color_1 + color_2
     drawer.reset()
-    drawer.draw_points(points, colors) # draw points
+    drawer.draw_points(points, colors)  # draw points
+
 
 if __name__ == "__main__":
     # Adapted from OpenPilot's bridge
@@ -80,7 +86,7 @@ if __name__ == "__main__":
     config = dict(
         use_render=not HEADLESS,
         window_size=(W, H),
-         sensors={
+        sensors={
             "rgb_camera": (RGBCamera, W, H),
         },
         interface_panel=[],
@@ -88,7 +94,7 @@ if __name__ == "__main__":
             "image_source": "rgb_camera",
         },
         image_on_cuda=False,
-        image_observation=True,       
+        image_observation=True,
         out_of_route_done=False,
         on_continuous_line_done=False,
         crash_vehicle_done=False,
@@ -113,14 +119,14 @@ if __name__ == "__main__":
         for i in range(10):
             o, r, tm, tc, i = env.step([0, 1])
         assert isinstance(o, dict)
-        point_drawer = env.engine.make_point_drawer(scale=1) # create a point drawer
+        point_drawer = env.engine.make_point_drawer(scale=1)  # create a point drawer
         print(HELP_MESSAGE)
 
         env.agent.expert_takeover = True
 
         for i in range(1, STEPS):
             o, r, tm, tc, info = env.step([0, 0])
-            
+
             if not HEADLESS:
                 env.render(
                     text={
@@ -128,34 +134,47 @@ if __name__ == "__main__":
                             "on" if env.current_track_agent.expert_takeover else "off"
                         ),
                         "Keyboard Control": "W,A,S,D",
-                        }
+                    }
                 )
 
             try:
                 if i % 20 == 0:
                     # image = Image.fromarray(cv2.cvtColor((o["image"][..., -1]*255).astype(np.uint8), cv2.COLOR_BGR2RGB))
-                    image = Image.fromarray((o["image"][..., -1]*255).astype(np.uint8))
+                    image = Image.fromarray(
+                        (o["image"][..., -1] * 255).astype(np.uint8)
+                    )
                     orig_sizes = (image.height, image.width)
                     original_img = F.to_tensor(image).clone().unsqueeze(0)
                     image = F.resize(image, size=input_sizes)
 
-                    model_in = torch.ByteTensor(torch.ByteStorage.from_buffer(image.tobytes()))
-
-                    model_in = model_in.view(image.size[1], image.size[0], len(image.getbands()))
-                    model_in = (
-                        model_in.permute((2, 0, 1)).contiguous().float().div(255).unsqueeze(0).numpy()
+                    model_in = torch.ByteTensor(
+                        torch.ByteStorage.from_buffer(image.tobytes())
                     )
 
-                    results, keypoints = inference_pipeline.inference(model_in, original_img, orig_sizes)
+                    model_in = model_in.view(
+                        image.size[1], image.size[0], len(image.getbands())
+                    )
+                    model_in = (
+                        model_in.permute((2, 0, 1))
+                        .contiguous()
+                        .float()
+                        .div(255)
+                        .unsqueeze(0)
+                        .numpy()
+                    )
 
-                    # TODO: visualize keypoints: https://metadrive-simulator.readthedocs.io/en/latest/points_and_lines.html#points 
+                    results, keypoints = inference_pipeline.inference(
+                        model_in, original_img, orig_sizes
+                    )
+
+                    # TODO: visualize keypoints: https://metadrive-simulator.readthedocs.io/en/latest/points_and_lines.html#points
                     # draw_keypoints(point_drawer, keypoints)
 
                     # cv2.imshow("Inferred image", results[0])
                     if SAVE_IMAGES:
                         cv2.imwrite(
-                                f"camera_observations/{str(i)}_inf.jpg",
-                                results[0],
+                            f"camera_observations/{str(i)}_inf.jpg",
+                            results[0],
                         )
 
             except Exception as e:
@@ -175,9 +194,13 @@ if __name__ == "__main__":
 
             # cv2.waitKey(1)
 
-            if (tm or tc) and info["arrive_dest"] and env.current_seed + 1 < env.config["start_seed"] + env.config["num_scenarios"]:
+            if (
+                (tm or tc)
+                and info["arrive_dest"]
+                and env.current_seed + 1
+                < env.config["start_seed"] + env.config["num_scenarios"]
+            ):
                 env.reset(env.current_seed + 1)
                 env.current_track_agent.expert_takeover = True
     finally:
         env.close()
-

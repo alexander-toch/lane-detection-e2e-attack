@@ -16,8 +16,15 @@ def run():
 
     # parse first cli argument as image path
     img_path = sys.argv[1]
+    results = inference(img_path)
+
+    cv2.imshow("Inferred image", results[0])
+    cv2.waitKey(5000)
+
+
+def inference(file_path, model_path=None):
     time_start = perf_counter()
-    image = Image.open(img_path).convert("RGB")
+    image = Image.open(file_path)
     orig_sizes = (image.height, image.width)
     original_img = F.to_tensor(image).clone().unsqueeze(0)
     image = F.resize(image, size=input_sizes)
@@ -31,11 +38,8 @@ def run():
     if BENCHMARK:
         print(f"Image preprocessing took {perf_counter() - time_start} seconds")
 
-    pipeline = ONNXPipeline()
-    results = pipeline.inference(model_in, original_img, orig_sizes)
-
-    cv2.imshow("Inferred image", results[0])
-    cv2.waitKey(5000)
+    pipeline = ONNXPipeline() if model_path is None else ONNXPipeline(model_path)
+    return pipeline.inference(model_in, original_img, orig_sizes)
 
 
 if __name__ == "__main__":

@@ -10,9 +10,9 @@ from pytorch_auto_drive.utils import (
 
 
 class ONNXPipeline:
-    def __init__(self):
+    def __init__(self, model_path=ONNX_MODEL_PATH):
         self.ort_sess = ort.InferenceSession(
-            ONNX_MODEL_PATH,
+            model_path,
             providers=ort.get_available_providers(),
         )
 
