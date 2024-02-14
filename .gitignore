@@ -112,3 +112,4 @@ datasets/
 __MACOSX/
 
 camera_observations/*.jpg
+camera_observations/archive/*

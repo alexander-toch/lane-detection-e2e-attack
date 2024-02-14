@@ -21,7 +21,7 @@ from metadrive.component.map.pg_map import MapGenerateMethod
 from utils import dummy_env
 
 import torch
-from inference.inference import ONNXPipeline
+from inference import ONNXPipeline
 from config import *
 from PIL import Image
 import pytorch_auto_drive.functional as F
@@ -62,7 +62,7 @@ if __name__ == "__main__":
     inference_pipeline = ONNXPipeline()
 
     map_config = {
-        "config": "SSCrSCS",
+        "config": "SSSSSS",
         BaseMap.GENERATE_TYPE: MapGenerateMethod.BIG_BLOCK_SEQUENCE,
         # BaseMap.GENERATE_CONFIG: 3,
         BaseMap.LANE_WIDTH: 3.5,

@@ -1,3 +1,6 @@
+import sys
+from metadrive import MetaDriveEnv
+
 def dummy_env():
     env = MetaDriveEnv({"use_render": False, "image_observation": False})
     try:

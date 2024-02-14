@@ -77,11 +77,9 @@ if __name__ == "__main__":
             "image_source": "rgb_camera",
         },
         agent_policy=LaneDetectionPolicy,
-        image_on_cuda=False,
+        image_on_cuda=False, # TODO: check if this is fixable
         image_observation=True,
-        out_of_route_done=False,
-        on_continuous_line_done=False,
-        out_of_route_done=False,
+        out_of_route_done=True,
         on_continuous_line_done=True,
         crash_vehicle_done=True,
         crash_object_done=True,
@@ -92,7 +90,7 @@ if __name__ == "__main__":
         decision_repeat=1,
         # physics_world_step_size=self.TICKS_PER_FRAME / 100, # Physics world step is 0.02s and will be repeated for decision_repeat times per env.step()
         preload_models=False,
-        manual_control=True,
+        manual_control=False,
     )
 
     dummy_env()
@@ -102,15 +100,14 @@ if __name__ == "__main__":
     try:
         env.reset()
         for i in range(10):
-            o, r, tm, tc, i = env.step([0, 1])
+            o, r, tm, tc, infos = env.step([0, 1])
         assert isinstance(o, dict)
         point_drawer = env.engine.make_point_drawer(scale=1)  # create a point drawer
         print(HELP_MESSAGE)
 
-        env.agent.expert_takeover = True
-
+        step_index = 0
         while True:
-            o, r, tm, tc, info = env.step()
+            o, r, tm, tc, info = env.step([0,0])
 
             if not HEADLESS:
                 env.render(
@@ -123,9 +120,9 @@ if __name__ == "__main__":
                 )
 
             if SAVE_IMAGES:
-                if i % 20 == 0:
+                if step_index % 20 == 0:
                     cv2.imwrite(
-                        f"camera_observations/{str(i)}.jpg",
+                        f"camera_observations/{str(step_index)}.jpg",
                         (
                             o["image"].get()[..., -1]
                             if env.config["image_on_cuda"]
@@ -134,13 +131,8 @@ if __name__ == "__main__":
                         * 255,
                     )
 
-            if (
-                (tm or tc)
-                and info["arrive_dest"]
-                and env.current_seed + 1
-                < env.config["start_seed"] + env.config["num_scenarios"]
-            ):
-                env.reset(env.current_seed + 1)
-                env.current_track_agent.expert_takeover = True
+            if tm or tc:
+                env.reset(env.current_seed + 1)            
+            step_index += 1
     finally:
         env.close()

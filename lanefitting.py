@@ -13,9 +13,8 @@ def get_steering_angle(keypoints, image_size: tuple) -> float:
         float: the steering angle in degrees
     """
 
-    assert (
-        len(keypoints) >= 2
-    ), "We need at least 2 lanes to calculate the steering angle"
+    if len(keypoints) < 2:
+        return None
 
     # get the lanes to the left and right of the car
     left_lane, right_lane, _ = get_ego_lanes(keypoints, image_size)
@@ -138,7 +137,7 @@ def calculate_radius(left_lane_poly, right_lane_poly, image_size: tuple):
     ) / np.absolute(2 * right_fit_cr[0])
 
     r1 = round((float(left_curverad) + float(right_curverad)) / 2.0, 2)
-    print(r1)
+
     if left_lane_poly.coefficients[0] - left_lane_poly.coefficients[-1] > 60:
         # curve_direction = 'Left'
         angle = -5729.57795 / r1
@@ -150,3 +149,39 @@ def calculate_radius(left_lane_poly, right_lane_poly, image_size: tuple):
         angle = 5729.57795 / r1
 
     return angle
+
+def draw_lane(image, keypoints, image_size: tuple):
+    # TODO: fix sizing
+    if len(keypoints) < 2:
+        return None
+
+    left_lane, right_lane, _ = get_ego_lanes(keypoints, image_size)
+
+    matrix, matrix_inv = get_transform_matrix(image_size)
+
+    left_lane_bev = perspective_warp(left_lane, matrix)
+    right_lane_bev = perspective_warp(right_lane, matrix)
+
+    left_lane_poly = fit_lane(left_lane_bev)
+    right_lane_poly = fit_lane(right_lane_bev)
+
+    width = image_size[0]
+    height = image_size[1]
+    color_fill_image = np.zeros([height, width, 3])
+
+    plot_x = np.linspace(0, width - 1, width)
+    left_fit_y = left_lane_poly(plot_x)
+    right_fit_y = right_lane_poly(plot_x)
+
+    l1 = np.transpose(np.vstack([plot_x, left_fit_y]))
+    l2 = np.array(np.transpose(np.vstack([plot_x, right_fit_y])))
+    pts = np.int_(np.vstack((l1, l2)))
+
+    color_fill_image = cv2.fillPoly(color_fill_image, [pts], (0, 255, 0))  
+
+    image_np = np.array(image)
+
+    color_fill_image_transformed = cv2.warpPerspective(color_fill_image, matrix_inv, (width, height))
+    result = cv2.addWeighted(image_np, 1, color_fill_image_transformed, 0.2, 0, dtype=cv2.CV_8U)
+
+    return result
