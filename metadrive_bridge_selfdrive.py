@@ -6,7 +6,7 @@ Note: This script require rendering, please following the installation instructi
 environment that allows popping up an window.
 """
 
-import argparse
+import argparse, sys
 from panda3d.core import Texture, GraphicsOutput
 
 import cv2
@@ -18,19 +18,18 @@ from metadrive.constants import HELP_MESSAGE
 from metadrive.component.map.base_map import BaseMap
 from metadrive.component.sensors.base_camera import _cuda_enable
 from metadrive.component.map.pg_map import MapGenerateMethod
-from utils import dummy_env
 
 import torch
-from inference.inference import ONNXPipeline
 from config import *
 from PIL import Image
+from metadrive_policy.lanedetection_policy import LaneDetectionPolicy
 import pytorch_auto_drive.functional as F
+from utils import dummy_env
 
 W, H = 1280, 720  #  Desired output size of annotated images
 
-SAVE_IMAGES = True
 HEADLESS = True
-STEPS = 20 * 300
+SAVE_IMAGES = True
 
 print(f"Using CUDA: {_cuda_enable}")
 print(f"Headless mode: {HEADLESS}")
@@ -58,11 +57,9 @@ def draw_keypoints(drawer, keypoints):
 
 
 if __name__ == "__main__":
-    # Adapted from OpenPilot's bridge
-    inference_pipeline = ONNXPipeline()
 
     map_config = {
-        "config": "SSCrSCS",
+        "config": "SSSSSS",
         BaseMap.GENERATE_TYPE: MapGenerateMethod.BIG_BLOCK_SEQUENCE,
         # BaseMap.GENERATE_CONFIG: 3,
         BaseMap.LANE_WIDTH: 3.5,
@@ -79,20 +76,22 @@ if __name__ == "__main__":
         vehicle_config={
             "image_source": "rgb_camera",
         },
+        agent_policy=LaneDetectionPolicy,
         image_on_cuda=False,
         image_observation=True,
         out_of_route_done=False,
         on_continuous_line_done=False,
-        crash_vehicle_done=False,
-        crash_object_done=False,
-        traffic_density=0.0,  # traffic is incredibly expensive
-        # map_config=create_map(),
+        out_of_route_done=False,
+        on_continuous_line_done=True,
+        crash_vehicle_done=True,
+        crash_object_done=True,
+        crash_human_done=True,
+        traffic_density=0.0,
         map_config=map_config,
-        # map=4,  # seven block
         num_scenarios=1,
         decision_repeat=1,
-        # physics_world_step_size=self.TICKS_PER_FRAME / 100,
-        # preload_models=False,
+        # physics_world_step_size=self.TICKS_PER_FRAME / 100, # Physics world step is 0.02s and will be repeated for decision_repeat times per env.step()
+        preload_models=False,
         manual_control=True,
     )
 
@@ -110,8 +109,8 @@ if __name__ == "__main__":
 
         env.agent.expert_takeover = True
 
-        for i in range(1, STEPS):
-            o, r, tm, tc, info = env.step([0, 0])
+        while True:
+            o, r, tm, tc, info = env.step()
 
             if not HEADLESS:
                 env.render(
@@ -122,49 +121,6 @@ if __name__ == "__main__":
                         "Keyboard Control": "W,A,S,D",
                     }
                 )
-
-            try:
-                if i % 20 == 0:
-                    # image = Image.fromarray(cv2.cvtColor((o["image"][..., -1]*255).astype(np.uint8), cv2.COLOR_BGR2RGB))
-                    image = Image.fromarray(
-                        (o["image"][..., -1] * 255).astype(np.uint8)
-                    )
-                    orig_sizes = (image.height, image.width)
-                    original_img = F.to_tensor(image).clone().unsqueeze(0)
-                    image = F.resize(image, size=input_sizes)
-
-                    model_in = torch.ByteTensor(
-                        torch.ByteStorage.from_buffer(image.tobytes())
-                    )
-
-                    model_in = model_in.view(
-                        image.size[1], image.size[0], len(image.getbands())
-                    )
-                    model_in = (
-                        model_in.permute((2, 0, 1))
-                        .contiguous()
-                        .float()
-                        .div(255)
-                        .unsqueeze(0)
-                        .numpy()
-                    )
-
-                    results, keypoints = inference_pipeline.inference(
-                        model_in, original_img, orig_sizes
-                    )
-
-                    # TODO: visualize keypoints: https://metadrive-simulator.readthedocs.io/en/latest/points_and_lines.html#points
-                    # draw_keypoints(point_drawer, keypoints)
-
-                    # cv2.imshow("Inferred image", results[0])
-                    if SAVE_IMAGES:
-                        cv2.imwrite(
-                            f"camera_observations/{str(i)}_inf.jpg",
-                            results[0],
-                        )
-
-            except Exception as e:
-                print(e)
 
             if SAVE_IMAGES:
                 if i % 20 == 0:
@@ -177,8 +133,6 @@ if __name__ == "__main__":
                         )
                         * 255,
                     )
-
-            # cv2.waitKey(1)
 
             if (
                 (tm or tc)
