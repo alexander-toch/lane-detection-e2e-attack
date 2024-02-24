@@ -41,27 +41,38 @@ class LaneDetectionPolicy(BasePolicy):
         image_size = (image.width, image.height)
 
         offset_center, lane_heading_theta, keypoints = (
-            self.onnx_pipeline.infer_offset_center(image, image_size)
+            self.onnx_pipeline.infer_offset_center(image, (image_size[1], image_size[0])) # important: swap image_size order
         )
+
+        
+        if offset_center is None:
+            return [0, self.acceleration()]
 
         v_heading = self.control_object.heading_theta  # current vehicle heading
-        steering = self.heading_pid.get_result(
-            -wrap_to_pi(lane_heading_theta - v_heading)
-        )
+        # steering = self.heading_pid.get_result(
+        #     -wrap_to_pi(lane_heading_theta - v_heading)
+        # )
+
+        STEERING_VALUE_RAD = np.deg2rad(15)
+        if offset_center > 0.01:
+            steering = self.lateral_pid.get_result(-wrap_to_pi(-STEERING_VALUE_RAD)) # radian in range (-pi, pi]
+        elif offset_center < -0.01:
+            steering = self.lateral_pid.get_result(-wrap_to_pi(+STEERING_VALUE_RAD)) # radian in range (-pi, pi]
+        else:
+            steering = self.lateral_pid.get_result(0)
 
         action = [steering, self.acceleration()]
+        # action = [0, self.acceleration()] # for disbling steering
 
         # TODO: add a flag to enable image saving
-        # lane_image = draw_lane(image, keypoints, image_size)
-        # if lane_image is not None:
-        #     print("saving")
-        #     random = np.random.randint(0, 100)
-        #     cv2.imwrite(
-        #         f"lane_{str(random)}.jpg",
-        #         lane_image
-        #     )
-
-        # TODO: check steering_control() in metadrive.policy.idm_policy
+        if self.control_object.engine.episode_step % 10 == 0:
+            print(f"Step: {self.control_object.engine.episode_step}, offset_center: {offset_center}, lane_heading_theta: {lane_heading_theta}, v_heading: {v_heading}, steering: {steering}")
+            lane_image = draw_lane(image, keypoints, image_size) # swap image_size
+            if lane_image is not None:
+                cv2.imwrite(
+                    f"camera_observations/lane_{str(self.control_object.engine.episode_step)}.jpg",
+                    lane_image
+                )
 
         return action
 

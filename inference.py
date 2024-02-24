@@ -4,7 +4,7 @@ import numpy as np
 import torch
 from config import *
 import pytorch_auto_drive.functional as F
-from lanefitting import get_offset_center, get_steering_angle
+from lanefitting import get_offset_center
 
 from pytorch_auto_drive.utils import (
     lane_as_segmentation_inference,
@@ -19,7 +19,7 @@ class ONNXPipeline:
 
         self.ort_sess = ort.InferenceSession(
             model_path,
-            providers=ort.get_available_providers(),
+            providers=['CUDAExecutionProvider', 'CPUExecutionProvider'],
             sess_options=sess_opt,
         )
 
@@ -79,7 +79,7 @@ class ONNXPipeline:
             forward=False,  # already called model
         )
 
-        off_center, lane_heading_theta = get_offset_center(
+        off_center, lane_heading_theta, _ = get_offset_center(
             keypoints[0], (orig_sizes[1], orig_sizes[0])
         )
 
