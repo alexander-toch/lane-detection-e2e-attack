@@ -4,12 +4,14 @@ import numpy as np
 import torch
 from config import *
 import pytorch_auto_drive.functional as F
-from lanefitting import get_steering_angle
+from lanefitting import get_offset_center, get_steering_angle
 
 from pytorch_auto_drive.utils import (
     lane_as_segmentation_inference,
     lane_detection_visualize_batched,
 )
+
+
 class ONNXPipeline:
     def __init__(self, model_path=ONNX_MODEL_PATH):
         sess_opt = ort.SessionOptions()
@@ -48,15 +50,11 @@ class ONNXPipeline:
         )
         return results, keypoints
 
-    def infer_steering_angle(self, image, orig_sizes):
+    def infer_offset_center(self, image, orig_sizes):
         image = F.resize(image, size=input_sizes)
-        model_in = torch.ByteTensor(
-            torch.ByteStorage.from_buffer(image.tobytes())
-        )
+        model_in = torch.ByteTensor(torch.ByteStorage.from_buffer(image.tobytes()))
 
-        model_in = model_in.view(
-            image.size[1], image.size[0], len(image.getbands())
-        )
+        model_in = model_in.view(image.size[1], image.size[0], len(image.getbands()))
         model_in = (
             model_in.permute((2, 0, 1))
             .contiguous()
@@ -65,7 +63,6 @@ class ONNXPipeline:
             .unsqueeze(0)
             .numpy()
         )
-
 
         onnx_out = self.ort_sess.run(None, {"input1": model_in})
         outputs = {"out": torch.Tensor(onnx_out[0]), "lane": torch.Tensor(onnx_out[1])}
@@ -81,8 +78,9 @@ class ONNXPipeline:
             max_lane,
             forward=False,  # already called model
         )
-        steering_angle = get_steering_angle(
+
+        off_center, lane_heading_theta = get_offset_center(
             keypoints[0], (orig_sizes[1], orig_sizes[0])
         )
 
-        return steering_angle, keypoints[0]
+        return off_center, lane_heading_theta, keypoints[0]
