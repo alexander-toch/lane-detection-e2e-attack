@@ -30,6 +30,7 @@ W, H = 1280, 720  #  Desired output size of annotated images
 
 HEADLESS = True
 SAVE_IMAGES = True
+SEED=1231
 
 print(f"Using CUDA: {_cuda_enable}")
 print(f"Headless mode: {HEADLESS}")
@@ -59,7 +60,7 @@ def draw_keypoints(drawer, keypoints):
 if __name__ == "__main__":
 
     map_config = {
-        "config": "SSSSSS",
+        "config": "SSSSSS", # S=Straight, C=Circular
         BaseMap.GENERATE_TYPE: MapGenerateMethod.BIG_BLOCK_SEQUENCE,
         # BaseMap.GENERATE_CONFIG: 3,
         BaseMap.LANE_WIDTH: 3.5,
@@ -77,6 +78,7 @@ if __name__ == "__main__":
             "image_source": "rgb_camera",
         },
         agent_policy=LaneDetectionPolicy,
+        start_seed=SEED,
         image_on_cuda=False, # TODO: check if this is fixable
         image_observation=True,
         out_of_route_done=True,
