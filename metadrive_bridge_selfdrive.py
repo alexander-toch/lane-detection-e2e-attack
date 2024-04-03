@@ -22,7 +22,12 @@ from metadrive.component.map.pg_map import MapGenerateMethod
 import torch
 from config import *
 from PIL import Image
-from metadrive_policy.lanedetection_policy import LaneDetectionPolicy
+ATTACK = True
+if ATTACK:
+    from metadrive_policy.lanedetection_policy_dpatch import LaneDetectionPolicy
+else:
+    from metadrive_policy.lanedetection_policy import LaneDetectionPolicy
+
 import pytorch_auto_drive.functional as F
 from utils import dummy_env
 
@@ -60,7 +65,7 @@ def draw_keypoints(drawer, keypoints):
 if __name__ == "__main__":
 
     map_config = {
-        "config": "SSSSSS", # S=Straight, C=Circular
+        "config": "SCS", # S=Straight, C=Circular/Curve
         BaseMap.GENERATE_TYPE: MapGenerateMethod.BIG_BLOCK_SEQUENCE,
         # BaseMap.GENERATE_CONFIG: 3,
         BaseMap.LANE_WIDTH: 3.5,
