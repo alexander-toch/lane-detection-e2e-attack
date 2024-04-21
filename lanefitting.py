@@ -171,7 +171,10 @@ def calculate_radius(left_lane_poly, right_lane_poly, image_size: tuple):
 
 def draw_lane(image, keypoints, image_size: tuple):
     if len(keypoints) < 2:
-        return None
+        print("No lanes detected")
+        image_np = np.array(image)
+        cv2.putText(image_np, f'NO LANES DETECTED', (10, 60), cv2.FONT_HERSHEY_SIMPLEX , 2, (0, 0, 255), 2, cv2.LINE_AA)
+        return image_np
 
     matrix, matrix_inv = get_transform_matrix(image_size)
     left_lane_bev, right_lane_bev, selected_indices = get_ego_lanes(keypoints, matrix, image_size)

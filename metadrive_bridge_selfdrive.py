@@ -35,7 +35,8 @@ W, H = 1280, 720  #  Desired output size of annotated images
 
 HEADLESS = True
 SAVE_IMAGES = True
-SEED=1231
+SEED=1234
+MAP_CONFIG = "SCS"
 
 print(f"Using CUDA: {_cuda_enable}")
 print(f"Headless mode: {HEADLESS}")
@@ -64,8 +65,9 @@ def draw_keypoints(drawer, keypoints):
 
 if __name__ == "__main__":
 
+    
     map_config = {
-        "config": "SCS", # S=Straight, C=Circular/Curve
+        "config": MAP_CONFIG, # S=Straight, C=Circular/Curve
         BaseMap.GENERATE_TYPE: MapGenerateMethod.BIG_BLOCK_SEQUENCE,
         # BaseMap.GENERATE_CONFIG: 3,
         BaseMap.LANE_WIDTH: 3.5,

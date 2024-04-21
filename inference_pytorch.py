@@ -4,6 +4,7 @@ from attack.pytorch_auto_drive.utils.runners.base import BaseTrainer
 from config import *
 import os
 import numpy as np
+from PIL import Image
 import torch
 from config import *
 import pytorch_auto_drive.functional as F
@@ -37,6 +38,7 @@ class PyTorchPipeline:
     def __init__(self, model_path=ONNX_MODEL_PATH):
         self.cfg = read_config(CONFIG)
         self.model = MODELS.from_dict(self.cfg['model'])
+        self.current_patch = None
 
         if not torch.cuda.is_available():
             self.device = torch.device("cpu")
@@ -46,7 +48,7 @@ class PyTorchPipeline:
 
 
         self.patch_size = (50,50)
-        self.patch_location=(380,237)
+        self.patch_location=(380,237) # in format (W, H). (800, 288) is input size for resa
         brightness_range= (0.8, 1.0)
         rotation_weights = (0.4, 0.2, 0.2, 0.2)
         optimizer = BaseTrainer.get_optimizer(self.cfg['optimizer'], self.model)
@@ -144,7 +146,11 @@ class PyTorchPipeline:
             keypoints[0], (orig_sizes[1], orig_sizes[0])
         )
 
-        return off_center, lane_heading_theta, keypoints[0]
+        debug_info = {
+            'probmaps': results,
+        }
+
+        return off_center, lane_heading_theta, keypoints[0], debug_info
     
     def save_image(self, image, path, sizes=input_sizes):
         image = image.transpose((1, 2, 0))
@@ -154,7 +160,7 @@ class PyTorchPipeline:
         # image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
         cv2.imwrite(path, image)
     
-    def infer_offset_center_with_dpatch(self, image, orig_sizes, control_object):
+    def infer_offset_center_with_dpatch(self, image, orig_sizes, control_object, generate_patch=True):
         image = F.resize(image, size=input_sizes)
         model_in = torch.ByteTensor(torch.ByteStorage.from_buffer(image.tobytes()))
 
@@ -168,12 +174,15 @@ class PyTorchPipeline:
             .numpy()
         )
         
-        patch = self.attack.generate(x=model_in.copy())[0]
+        if generate_patch or self.current_patch is None:
+            self.current_patch = self.attack.generate(x=model_in.copy())[0]
+        
+        patch = self.current_patch
 
         # place patch
         x_1, y_1 = self.patch_location
         x_2, y_2 = x_1 + patch.shape[1], y_1 + patch.shape[2]
-        model_in[0][:,  y_1:y_2, x_1:x_2] = patch
+        model_in[0][:, y_1:y_2, x_1:x_2] = patch
 
         self.save_image(model_in.copy()[0], f'camera_observations/{control_object.engine.episode_step}_dpatched.jpg')
 
@@ -195,4 +204,18 @@ class PyTorchPipeline:
             keypoints[0], (orig_sizes[1], orig_sizes[0])
         )
 
-        return off_center, lane_heading_theta, keypoints[0]
+        # scale patch to match orig_sizes proportionally
+        scale_factor_height = orig_sizes[0]/input_sizes[0]
+        scale_factor_width = orig_sizes[1]/input_sizes[1]
+        patch = patch.transpose((1, 2, 0))
+        patch = np.clip(patch, 0, 1)
+        patch = (patch * 255).astype(np.uint8)
+        patch = cv2.resize(patch, (int(patch.shape[0] * scale_factor_width), int(patch.shape[1] * scale_factor_height)))
+
+        debug_info = {
+            'patch': patch,
+            'location': (int(self.patch_location[1] * scale_factor_height), int(self.patch_location[0] * scale_factor_width)), # format (H, W)
+            'probmaps': results,
+        }
+
+        return off_center, lane_heading_theta, keypoints[0], debug_info
