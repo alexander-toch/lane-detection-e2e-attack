@@ -42,7 +42,7 @@ class LaneDetectionPolicy(BasePolicy):
         image = Image.fromarray((observation["image"][..., -1] * 255).astype(np.uint8))
         image_size = (image.width, image.height)
 
-        if True or self.control_object.engine.episode_step < 100: # start attack after 100 steps # TODO: use variable
+        if self.control_object.engine.episode_step < 100: # start attack after 100 steps # TODO: use variable
             offset_center, lane_heading_theta, keypoints, debug_info = (
                 self.pipeline.infer_offset_center(image, (image_size[1], image_size[0]), self.control_object) # important: swap image_size order
             )
