@@ -14,6 +14,10 @@ sys.path.append(os.path.dirname(os.getcwd()))
 from inference_pytorch import PyTorchPipeline
 from lanefitting import draw_lane
 
+# TARGET=None
+TARGET=np.load("attack/targets/turn_right.npy", allow_pickle=True).item()
+START_ATTACK_AFTER=100
+
 
 class LaneDetectionPolicy(BasePolicy):
     MAX_SPEED = 100  # km/h
@@ -24,7 +28,11 @@ class LaneDetectionPolicy(BasePolicy):
 
     def __init__(self, control_object, random_seed=None, config=None):
         super(LaneDetectionPolicy, self).__init__(control_object, random_seed, config)
-        self.pipeline = PyTorchPipeline()
+        self.target = TARGET
+        if self.target is not None:
+            self.pipeline = PyTorchPipeline(targeted=True)
+        else:
+            self.pipeline = PyTorchPipeline()       
         self.camera_observation = ImageStateObservation(get_global_config().copy())
         self.target_speed = self.NORMAL_SPEED
         self.heading_pid = PIDController(1.7, 0.01, 3.5)
@@ -42,19 +50,19 @@ class LaneDetectionPolicy(BasePolicy):
         image = Image.fromarray((observation["image"][..., -1] * 255).astype(np.uint8))
         image_size = (image.width, image.height)
 
-        if self.control_object.engine.episode_step < 100: # start attack after 100 steps # TODO: use variable
+        if self.control_object.engine.episode_step < START_ATTACK_AFTER:
             offset_center, lane_heading_theta, keypoints, debug_info = (
-                self.pipeline.infer_offset_center(image, (image_size[1], image_size[0]), self.control_object) # important: swap image_size order
+                self.pipeline.infer_offset_center(image, (image_size[1], image_size[0])) # important: swap image_size order
             )
         else:
             # generate a fresh patch every 20 steps
             if self.control_object.engine.episode_step % 20 == 0:
                 offset_center, lane_heading_theta, keypoints, debug_info = (
-                    self.pipeline.infer_offset_center_with_dpatch(image, (image_size[1], image_size[0]), self.control_object, True) # important: swap image_size order
+                    self.pipeline.infer_offset_center_with_dpatch(image, (image_size[1], image_size[0]), self.control_object, True, target=self.target) # important: swap image_size order
                 )
             else:
                 offset_center, lane_heading_theta, keypoints, debug_info = (
-                    self.pipeline.infer_offset_center_with_dpatch(image, (image_size[1], image_size[0]), self.control_object, False) # important: swap image_size order
+                    self.pipeline.infer_offset_center_with_dpatch(image, (image_size[1], image_size[0]), self.control_object, False, target=self.target) # important: swap image_size order
                 )
 
         v_heading = self.control_object.heading_theta  # current vehicle heading
@@ -81,10 +89,13 @@ class LaneDetectionPolicy(BasePolicy):
             lane_image = draw_lane(image, keypoints, image_size) # swap image_size
 
             # lane iamge format is (H, W, C), (720, 1280, 3)
+            # debug_info['patch'].shape is (W, H, C)
             if 'patch' in debug_info and 'location' in debug_info:
+                patch = debug_info['patch'].transpose(1, 0, 2) # convert to H,W,C
+
                 x_1, y_1 = debug_info['location']
-                x_2, y_2 = x_1 + debug_info['patch'].shape[0], y_1 + debug_info['patch'].shape[1]
-                lane_image[x_1:x_2, y_1:y_2, :] = debug_info['patch']
+                x_2, y_2 = x_1 + patch.shape[1], y_1 + patch.shape[0]
+                lane_image[y_1:y_2, x_1:x_2, :] = patch
 
             if lane_image is not None:
                 cv2.imwrite(
@@ -113,10 +124,10 @@ class LaneDetectionPolicy(BasePolicy):
                     merged = np.maximum(merged, pred)
                     merged_softmax = np.maximum(merged_softmax, pred_softmax)
 
-                np.save(f"camera_observations/probmap_{str(self.control_object.engine.episode_step)}.npy", debug_info['probmaps'])
+                np.save(f"camera_observations/zzz_probmap_{str(self.control_object.engine.episode_step)}.npy", debug_info['probmaps'])
 
                 im = Image.fromarray(merged)
-                im_softmax = Image.fromarray(merged)
+                im_softmax = Image.fromarray(merged_softmax)
                 plt.imsave(f"camera_observations/probmap_{str(self.control_object.engine.episode_step)}_merged.jpg", im, cmap='seismic')
                 plt.imsave(f"camera_observations/softmax_probmap_{str(self.control_object.engine.episode_step)}_merged.jpg", im_softmax, cmap='seismic')
 

@@ -35,7 +35,7 @@ elif MODEL == "scnn":
     CHECKPOINT=script_dir + '/../resnet50_scnn_culane_20210311.pt'
 
 class PyTorchPipeline:
-    def __init__(self, model_path=ONNX_MODEL_PATH):
+    def __init__(self, model_path=ONNX_MODEL_PATH, targeted=False):
         self.cfg = read_config(CONFIG)
         self.model = MODELS.from_dict(self.cfg['model'])
         self.current_patch = None
@@ -47,8 +47,8 @@ class PyTorchPipeline:
             self.device = torch.device(f"cuda:{cuda_idx}")
 
 
-        self.patch_size = (50,50)
-        self.patch_location=(380,237) # in format (W, H). (800, 288) is input size for resa
+        self.patch_size = (70,50) # (height, width)
+        self.patch_location=(380,217) # in format (W, H). (800, 288) is input size for resa
         brightness_range= (0.8, 1.0)
         rotation_weights = (0.4, 0.2, 0.2, 0.2)
         optimizer = BaseTrainer.get_optimizer(self.cfg['optimizer'], self.model)
@@ -77,6 +77,7 @@ class PyTorchPipeline:
             channels_first=True,
         )
 
+        self.targeted = targeted
         self.attack = MyRobustDPatch(estimator=classifier, 
                         max_iter=50,
                         sample_size=1,
@@ -84,6 +85,7 @@ class PyTorchPipeline:
                         patch_location=self.patch_location,
                         brightness_range=brightness_range,
                         learning_rate=5.0,
+                        targeted=self.targeted
                         # rotation_weights=rotation_weights,
                     )
 
@@ -114,7 +116,7 @@ class PyTorchPipeline:
         )
         return results, keypoints
 
-    def infer_offset_center(self, image, orig_sizes, control_object):
+    def infer_offset_center(self, image, orig_sizes):
         image = F.resize(image, size=input_sizes)
         model_in = torch.ByteTensor(torch.ByteStorage.from_buffer(image.tobytes()))
 
@@ -160,7 +162,10 @@ class PyTorchPipeline:
         # image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
         cv2.imwrite(path, image)
     
-    def infer_offset_center_with_dpatch(self, image, orig_sizes, control_object, generate_patch=True):
+    def infer_offset_center_with_dpatch(self, image, orig_sizes, control_object, generate_patch=True, target=None):
+        if self.targeted and target is None:
+            raise ValueError("Targeted attack requires a target!")
+
         image = F.resize(image, size=input_sizes)
         model_in = torch.ByteTensor(torch.ByteStorage.from_buffer(image.tobytes()))
 
@@ -175,16 +180,19 @@ class PyTorchPipeline:
         )
         
         if generate_patch or self.current_patch is None:
-            self.current_patch = self.attack.generate(x=model_in.copy())[0]
+            if self.targeted:
+                self.current_patch = self.attack.generate(x=model_in.copy(), y=target)[0]
+            else:
+                self.current_patch = self.attack.generate(x=model_in.copy())[0]
         
         patch = self.current_patch
 
         # place patch
         x_1, y_1 = self.patch_location
-        x_2, y_2 = x_1 + patch.shape[1], y_1 + patch.shape[2]
+        x_2, y_2 = x_1 + patch.shape[2], y_1 + patch.shape[1]
         model_in[0][:, y_1:y_2, x_1:x_2] = patch
 
-        self.save_image(model_in.copy()[0], f'camera_observations/{control_object.engine.episode_step}_dpatched.jpg')
+        self.save_image(model_in[0], f'camera_observations/{control_object.engine.episode_step}_dpatched.jpg')
 
         results = self.model(torch.from_numpy(model_in).to(self.device))
 
@@ -210,11 +218,11 @@ class PyTorchPipeline:
         patch = patch.transpose((1, 2, 0))
         patch = np.clip(patch, 0, 1)
         patch = (patch * 255).astype(np.uint8)
-        patch = cv2.resize(patch, (int(patch.shape[0] * scale_factor_width), int(patch.shape[1] * scale_factor_height)))
+        patch = cv2.resize(patch, (int(patch.shape[0] * scale_factor_height), int(patch.shape[1] * scale_factor_width)))
 
         debug_info = {
             'patch': patch,
-            'location': (int(self.patch_location[1] * scale_factor_height), int(self.patch_location[0] * scale_factor_width)), # format (H, W)
+            'location': (int(self.patch_location[0] * scale_factor_width), int(self.patch_location[1] * scale_factor_height)), # format (x, y)
             'probmaps': results,
         }
 

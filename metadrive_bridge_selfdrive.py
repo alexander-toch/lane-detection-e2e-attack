@@ -22,12 +22,7 @@ from metadrive.component.map.pg_map import MapGenerateMethod
 import torch
 from config import *
 from PIL import Image
-ATTACK = True
-if ATTACK:
-    from metadrive_policy.lanedetection_policy_dpatch import LaneDetectionPolicy
-else:
-    from metadrive_policy.lanedetection_policy import LaneDetectionPolicy
-
+from metadrive_policy.lanedetection_policy_dpatch import LaneDetectionPolicy
 import pytorch_auto_drive.functional as F
 from utils import dummy_env
 
@@ -35,8 +30,8 @@ W, H = 1280, 720  #  Desired output size of annotated images
 
 HEADLESS = True
 SAVE_IMAGES = True
-SEED=1234
-MAP_CONFIG = "SCS"
+SEED=1236 # was 1234
+MAP_CONFIG = "SCS" # SCS worked quite well
 
 print(f"Using CUDA: {_cuda_enable}")
 print(f"Headless mode: {HEADLESS}")
