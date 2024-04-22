@@ -1,4 +1,15 @@
-# Lane detection with ONNX models on MetaDrive
+# End-to-end robustness testing of DNN lane detection models
+
+This project is part of my master thesis (TODO: add title/link) and enables robustness testing of DNN-based lane detection models (semantic segmentation) of [PytorchAutoDrive](https://github.com/voldemortX/pytorch-auto-drive) with attacks taken from the [Adversarial Robustness Toolbox](https://github.com/Trusted-AI/adversarial-robustness-toolbox).
+
+The robustness testing is performed in an end-to-end setting within the [MetaDrive](https://github.com/metadriverse/metadrive) simulator.
+
+![animated gif of an example attack](example-attack.gif)
+
+Currently supported models: RESA ([paper](https://arxiv.org/abs/2008.13719))
+
+Currently supported attacks: modified Robust DPatch ([paper](https://arxiv.org/abs/1906.11897))
+
 
 ## Requirements
 
@@ -6,24 +17,10 @@ Conda: https://docs.conda.io/projects/miniconda/en/latest/
 
 ## Installation
 
-Requirements: `panda3d metadrive-simulator opencv-python numpy pillow torch torchvision adversarial-robustness-toolbox[pytorch_image] timm`
-`pip install -U openmim && mim install mmcv`
+Tested on Ubuntu Bullseye (SLURM node) with a Nvidia Tesla T4 (headless rendering).
 
-On Apple Silicon:
-```
-CONDA_SUBDIR=osx-arm64 conda create -n ld3.9 python=3.9 
-conda activate ld3.9
-pip3 install -r requirements-arm.txt
-```
+Setup conda environment with:
 
-On Linux:
-```
-conda create -n ld3.9 python=3.9 
-conda activate ld3.9
-pip3 install panda3d metadrive-simulator opencv-python numpy pillow torch torchvision
-```
-
-Commands for SLURM cluster:
 ```
 srun -N 1 -n 1 --gpus-per-node=1 --ntasks-per-node=1 --pty bash -i
 conda create -n ld python=3.9 
@@ -37,6 +34,12 @@ conda list -e > requirements.txt
 python3 -m metadrive.examples.verify_headless_installation --cuda --camera rgb
 ```
 
-ONNX Runtime:
-- Intel GPUs: `pip3 install onnxruntime`
-- Nvidia: `pip3 install onnxruntime-gpu``
+## Execution
+
+Currently, the attack is started via `rm -rf camera_observations/*.{jpg,npy} && python metadrive_bridge_selfdrive.py`
+
+## Resources / Links
+
+- [MetaDrive](https://github.com/metadriverse/metadrive)
+- [Adversarial Robustness Toolbox](https://github.com/Trusted-AI/adversarial-robustness-toolbox)
+- [PytorchAutoDrive](https://github.com/voldemortX/pytorch-auto-drive)
