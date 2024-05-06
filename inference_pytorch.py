@@ -47,8 +47,8 @@ class PyTorchPipeline:
             self.device = torch.device(f"cuda:{cuda_idx}")
 
 
-        self.patch_size = (70,50) # (height, width)
-        self.patch_location=(380,217) # in format (W, H). (800, 288) is input size for resa
+        self.patch_size = (50,50) # (height, width)
+        self.patch_location=(380,237) # in format (W, H). (800, 288) is input size for resa
         brightness_range= (0.8, 1.0)
         rotation_weights = (0.4, 0.2, 0.2, 0.2)
         optimizer = BaseTrainer.get_optimizer(self.cfg['optimizer'], self.model)

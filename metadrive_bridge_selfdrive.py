@@ -106,8 +106,6 @@ if __name__ == "__main__":
         for i in range(10):
             o, r, tm, tc, infos = env.step([0, 1])
         assert isinstance(o, dict)
-        point_drawer = env.engine.make_point_drawer(scale=1)  # create a point drawer
-        print(HELP_MESSAGE)
 
         step_index = 0
         while True:

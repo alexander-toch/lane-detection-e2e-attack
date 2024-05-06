@@ -125,7 +125,6 @@ if __name__ == "__main__":
 
             try:
                 if i % 20 == 0:
-                    # image = Image.fromarray(cv2.cvtColor((o["image"][..., -1]*255).astype(np.uint8), cv2.COLOR_BGR2RGB))
                     image = Image.fromarray(
                         (o["image"][..., -1] * 255).astype(np.uint8)
                     )
