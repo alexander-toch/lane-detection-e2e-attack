@@ -30,7 +30,7 @@ W, H = 1280, 720  #  Desired output size of annotated images
 
 HEADLESS = True
 SAVE_IMAGES = True
-SEED=1236 # was 1234
+SEED=1235 # was 1234
 MAP_CONFIG = "SCS" # SCS worked quite well
 
 print(f"Using CUDA: {_cuda_enable}")
@@ -97,7 +97,7 @@ if __name__ == "__main__":
         manual_control=False,
     )
 
-    dummy_env()
+    # dummy_env()
 
     env = MetaDriveEnv(config)
 

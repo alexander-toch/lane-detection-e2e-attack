@@ -96,7 +96,7 @@ if __name__ == "__main__":
         manual_control=True,
     )
 
-    dummy_env()
+    # dummy_env()
 
     env = MetaDriveEnv(config)
 

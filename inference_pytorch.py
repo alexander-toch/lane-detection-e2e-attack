@@ -184,6 +184,7 @@ class PyTorchPipeline:
                 self.current_patch = self.attack.generate(x=model_in.copy(), y=target)[0]
             else:
                 self.current_patch = self.attack.generate(x=model_in.copy())[0]
+            self.save_image(self.current_patch, f'camera_observations/{control_object.engine.episode_step}_patch.jpg', sizes=(self.current_patch.shape[1], self.current_patch.shape[2]))
         
         patch = self.current_patch
 

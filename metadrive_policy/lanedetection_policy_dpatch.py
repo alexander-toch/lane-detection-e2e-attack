@@ -14,8 +14,8 @@ sys.path.append(os.path.dirname(os.getcwd()))
 from inference_pytorch import PyTorchPipeline
 from lanefitting import draw_lane
 
-TARGET=None
-# TARGET=np.load("attack/targets/turn_right.npy", allow_pickle=True).item()
+# TARGET=None
+TARGET=np.load("attack/targets/turn_right.npy", allow_pickle=True).item()
 START_ATTACK_AFTER=100
 
 

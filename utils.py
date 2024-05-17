@@ -8,9 +8,9 @@ def dummy_env():
         env.reset()
         for i in range(1, 10):
             o, r, tm, tc, info = env.step([0, 1])
-    except:
+    except Exception as e:
         print("Error happens in Bullet physics world !")
-        sys.exit()
+        raise e
     else:
         print("Bullet physics world is launched successfully!")
     finally:
