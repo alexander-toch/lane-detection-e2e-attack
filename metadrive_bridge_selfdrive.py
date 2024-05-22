@@ -26,7 +26,7 @@ from metadrive_policy.lanedetection_policy_dpatch import LaneDetectionPolicy
 import pytorch_auto_drive.functional as F
 from utils import dummy_env
 
-W, H = 1280, 720  #  Desired output size of annotated images
+W, H = 1640, 590  #  Desired output size of annotated images
 
 HEADLESS = True
 SAVE_IMAGES = True
@@ -70,6 +70,7 @@ if __name__ == "__main__":
     }
 
     config = dict(
+        enable_dirty_road_patch_attack=True,
         use_render=not HEADLESS,
         window_size=(W, H),
         sensors={

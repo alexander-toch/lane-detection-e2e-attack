@@ -16,7 +16,7 @@ from lanefitting import draw_lane
 
 # TARGET=None
 TARGET=np.load("attack/targets/turn_right.npy", allow_pickle=True).item()
-START_ATTACK_AFTER=100
+START_ATTACK_AFTER = 500
 
 
 class LaneDetectionPolicy(BasePolicy):
@@ -52,7 +52,7 @@ class LaneDetectionPolicy(BasePolicy):
 
         if self.control_object.engine.episode_step < START_ATTACK_AFTER:
             offset_center, lane_heading_theta, keypoints, debug_info = (
-                self.pipeline.infer_offset_center(image, (image_size[1], image_size[0])) # important: swap image_size order
+                self.pipeline.infer_offset_center(image, (image_size[1], image_size[0]), self.control_object) # important: swap image_size order
             )
         else:
             # generate a fresh patch every 20 steps
@@ -92,9 +92,9 @@ class LaneDetectionPolicy(BasePolicy):
             lane_image = draw_lane(image, keypoints, image_size) # swap image_size
 
             # lane iamge format is (H, W, C), (720, 1280, 3)
-            # debug_info['patch'].shape is (W, H, C)
+            # debug_info['patch'].shape is (H, W, C)
             if 'patch' in debug_info and 'location' in debug_info:
-                patch = debug_info['patch'].transpose(1, 0, 2) # convert to H,W,C
+                patch = debug_info['patch']#.transpose(1, 0, 2) # convert to H,W,C
 
                 x_1, y_1 = debug_info['location']
                 x_2, y_2 = x_1 + patch.shape[1], y_1 + patch.shape[0]
@@ -127,7 +127,7 @@ class LaneDetectionPolicy(BasePolicy):
                     merged = np.maximum(merged, pred)
                     merged_softmax = np.maximum(merged_softmax, pred_softmax)
 
-                np.save(f"camera_observations/zzz_probmap_{str(self.control_object.engine.episode_step)}.npy", debug_info['probmaps'])
+                # np.save(f"camera_observations/zzz_probmap_{str(self.control_object.engine.episode_step)}.npy", debug_info['probmaps'])
 
                 im = Image.fromarray(merged)
                 im_softmax = Image.fromarray(merged_softmax)

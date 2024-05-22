@@ -41,7 +41,7 @@ def get_offset_center(keypoints, image_size: tuple) -> float:
     start_point = (current_center_x, height)
     end_point = (
         desired_center_x,
-        height - 400 * np.sin(angle_rad),
+        height - 400 * np.sin(angle_rad), # TODO: check if 400 needs to be dynamically calculated
     )
     heading_theta = np.arctan2(
         end_point[1] - start_point[1], end_point[0] - start_point[0]

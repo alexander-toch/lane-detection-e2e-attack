@@ -116,8 +116,8 @@ class PyTorchPipeline:
         )
         return results, keypoints
 
-    def infer_offset_center(self, image, orig_sizes):
-        image = F.resize(image, size=input_sizes)
+    def infer_offset_center(self, image, orig_sizes, control_object):
+        image = F.resize(image, size=input_sizes) #, interpolation=Image.NEAREST)
         model_in = torch.ByteTensor(torch.ByteStorage.from_buffer(image.tobytes()))
 
         model_in = model_in.view(image.size[1], image.size[0], len(image.getbands()))
@@ -130,6 +130,7 @@ class PyTorchPipeline:
             .numpy()
         )
 
+        self.save_image(model_in[0], f'camera_observations/{control_object.engine.episode_step}_model_input.jpg')
         results = self.model(torch.from_numpy(model_in).to(self.device))
 
         keypoints = lane_as_segmentation_inference(
@@ -166,7 +167,7 @@ class PyTorchPipeline:
         if self.targeted and target is None:
             raise ValueError("Targeted attack requires a target!")
 
-        image = F.resize(image, size=input_sizes)
+        image = F.resize(image, size=input_sizes) #, interpolation=Image.NEAREST)
         model_in = torch.ByteTensor(torch.ByteStorage.from_buffer(image.tobytes()))
 
         model_in = model_in.view(image.size[1], image.size[0], len(image.getbands()))
@@ -193,7 +194,7 @@ class PyTorchPipeline:
         x_2, y_2 = x_1 + patch.shape[2], y_1 + patch.shape[1]
         model_in[0][:, y_1:y_2, x_1:x_2] = patch
 
-        self.save_image(model_in[0], f'camera_observations/{control_object.engine.episode_step}_dpatched.jpg')
+        self.save_image(model_in[0], f'camera_observations/{control_object.engine.episode_step}_model_input.jpg')
 
         results = self.model(torch.from_numpy(model_in).to(self.device))
 
@@ -219,7 +220,10 @@ class PyTorchPipeline:
         patch = patch.transpose((1, 2, 0))
         patch = np.clip(patch, 0, 1)
         patch = (patch * 255).astype(np.uint8)
-        patch = cv2.resize(patch, (int(patch.shape[0] * scale_factor_height), int(patch.shape[1] * scale_factor_width)))
+        patch = cv2.resize(patch, (int(patch.shape[1] * scale_factor_width), int(patch.shape[0] * scale_factor_height)))
+
+        if generate_patch:
+            cv2.imwrite(f'camera_observations/{control_object.engine.episode_step}_patch.jpg', patch)
 
         debug_info = {
             'patch': patch,
