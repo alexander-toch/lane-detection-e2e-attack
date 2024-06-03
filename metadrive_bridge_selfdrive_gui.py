@@ -29,7 +29,7 @@ from utils import dummy_env
 W, H = 1640, 590  #  Desired output size of annotated images
 
 HEADLESS = False
-SAVE_IMAGES = True
+SAVE_IMAGES = False
 SEED=1235 # was 1234
 MAP_CONFIG = "SCS" # SCS worked quite well
 
@@ -95,13 +95,14 @@ if __name__ == "__main__":
         decision_repeat=1,
         # physics_world_step_size=self.TICKS_PER_FRAME / 100, # Physics world step is 0.02s and will be repeated for decision_repeat times per env.step()
         preload_models=False,
-        manual_control=False,
+        manual_control=True,
     )
 
     env = MetaDriveEnv(config)
 
     try:
         env.reset()
+        env.current_track_agent.expert_takeover = True
         for i in range(10):
             o, r, tm, tc, infos = env.step([0, 1])
         assert isinstance(o, dict)

@@ -142,7 +142,7 @@ class PyTorchPipeline:
                 .numpy()
             )
 
-            self.save_image(model_in[0], f'camera_observations/{control_object.engine.episode_step}_model_input.jpg')
+            # self.save_image(model_in[0], f'camera_observations/{control_object.engine.episode_step}_model_input.jpg')
             results = self.model(torch.from_numpy(model_in).to(self.device))
 
         keypoints = lane_as_segmentation_inference(
@@ -197,7 +197,7 @@ class PyTorchPipeline:
                 self.current_patch = self.attack.generate(x=model_in.copy(), y=target)[0]
             else:
                 self.current_patch = self.attack.generate(x=model_in.copy())[0]
-            self.save_image(self.current_patch, f'camera_observations/{control_object.engine.episode_step}_patch.jpg', sizes=(self.current_patch.shape[1], self.current_patch.shape[2]))
+            # self.save_image(self.current_patch, f'camera_observations/{control_object.engine.episode_step}_patch.jpg', sizes=(self.current_patch.shape[1], self.current_patch.shape[2]))
         
         patch = self.current_patch
 
@@ -206,7 +206,7 @@ class PyTorchPipeline:
         x_2, y_2 = x_1 + patch.shape[2], y_1 + patch.shape[1]
         model_in[0][:, y_1:y_2, x_1:x_2] = patch
 
-        self.save_image(model_in[0], f'camera_observations/{control_object.engine.episode_step}_model_input.jpg')
+        # self.save_image(model_in[0], f'camera_observations/{control_object.engine.episode_step}_model_input.jpg')
 
         results = self.model(torch.from_numpy(model_in).to(self.device))
 

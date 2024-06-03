@@ -3,6 +3,7 @@ from metadrive.policy.base_policy import BasePolicy
 from metadrive.engine.engine_utils import get_global_config
 from metadrive.obs.image_obs import ImageStateObservation
 from metadrive.component.vehicle.PID_controller import PIDController
+from metadrive.policy.manual_control_policy import KeyboardController, get_controller
 from metadrive.utils.math import not_zero, wrap_to_pi
 from PIL import Image
 import numpy as np
@@ -38,13 +39,40 @@ class LaneDetectionPolicy(BasePolicy):
         self.heading_pid = PIDController(1.7, 0.01, 3.5)
         self.lateral_pid = PIDController(0.3, 0.002, 0.05)
 
+        if get_global_config()["manual_control"] and get_global_config()["use_render"]:
+            self.engine.accept("t", self.toggle_takeover)
+            pygame_control = False
+        elif get_global_config()["manual_control"]:
+            # Use pygame to accept key strike.
+            pygame_control = True
+        else:
+            pygame_control = False
+
+        # if config["manual_control"] and config["use_render"]:
+        if get_global_config()["manual_control"]:
+            self.controller = get_controller(get_global_config()["controller"], pygame_control=pygame_control)
+            if self.controller is None:
+                self.controller = KeyboardController(pygame_control=pygame_control)
+        else:
+            self.controller = None
+
     def act(self, agent_id=None):
         action = self.expert()
         self.action_info["action"] = action
         return action
 
+    def toggle_takeover(self):
+        if self.engine.current_track_agent is not None:
+            self.engine.current_track_agent.expert_takeover = not self.engine.current_track_agent.expert_takeover
+            print("The expert takeover is set to: ", self.engine.current_track_agent.expert_takeover)
+
     def expert(self):
 
+        if not self.engine.current_track_agent.expert_takeover:
+            action = self.controller.process_input(self.engine.current_track_agent)
+            self.action_info["manual_control"] = True
+            return action
+        
         # get RGB camera image from vehicle
         observation = self.camera_observation.observe(self.control_object)
 
@@ -95,7 +123,7 @@ class LaneDetectionPolicy(BasePolicy):
         # action = [0, self.acceleration()] # for disbling steering
 
         # TODO: add a flag to enable image saving and interval
-        if self.control_object.engine.episode_step % 10 == 0 or True:
+        if self.control_object.engine.episode_step % 10 == 0:
             print(f"Step: {self.control_object.engine.episode_step}, offset_center: {offset_center}, lane_heading_theta: {lane_heading_theta}, v_heading: {v_heading}, steering: {steering}")
             lane_image = draw_lane(image.get() if image_on_cuda else image, keypoints, image_size) # swap image_size
 
