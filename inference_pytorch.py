@@ -3,6 +3,7 @@ import cv2
 from attack.pytorch_auto_drive.utils.runners.base import BaseTrainer
 from config import *
 import os
+import sys
 import numpy as np
 from PIL import Image
 import torch
@@ -25,14 +26,14 @@ MODEL="resa"
 script_dir=os.path.dirname(os.path.realpath(__file__))
 
 if MODEL == "baseline":
-    CONFIG=script_dir + '/attack/pytorch_auto_drive/configs/lane_detection/baseline/resnet50_culane.py'
-    CHECKPOINT=script_dir + '/../resnet50_baseline_culane_20210308.pt'
+    CONFIG=os.path.join(script_dir, 'attack/pytorch_auto_drive/configs/lane_detection/baseline/resnet50_culane.py').replace('\\','/')
+    CHECKPOINT=os.path.join(script_dir, '../resnet50_baseline_culane_20210308.pt').replace('\\','/')
 elif MODEL == "resa":
-    CONFIG=script_dir + '/attack/pytorch_auto_drive/configs/lane_detection/resa/resnet50_culane.py'
-    CHECKPOINT=script_dir + '/../resnet50_resa_culane_20211016.pt'
+    CONFIG=os.path.join(script_dir, 'attack/pytorch_auto_drive/configs/lane_detection/resa/resnet50_culane.py').replace('\\','/')
+    CHECKPOINT=os.path.join(script_dir, '../resnet50_resa_culane_20211016.pt').replace('\\','/')
 elif MODEL == "scnn":
-    CONFIG=script_dir + '/attack/pytorch_auto_drive/configs/lane_detection/scnn/resnet50_culane.py'
-    CHECKPOINT=script_dir + '/../resnet50_scnn_culane_20210311.pt'
+    CONFIG=os.path.join(script_dir, 'attack/pytorch_auto_drive/configs/lane_detection/scnn/resnet50_culane.py').replace('\\','/')
+    CHECKPOINT=os.path.join(script_dir, '../resnet50_scnn_culane_20210311.pt').replace('\\','/')
 
 class PyTorchPipeline:
     def __init__(self, model_path=ONNX_MODEL_PATH, targeted=False):
@@ -116,22 +117,33 @@ class PyTorchPipeline:
         )
         return results, keypoints
 
-    def infer_offset_center(self, image, orig_sizes, control_object):
+    def infer_offset_center(self, image, orig_sizes, control_object, image_on_cuda=False):
+        if image_on_cuda:
+            # image arrives in (H, W, C), needs to have [C, H, W] format
+            image = torch.as_tensor(image, device='cuda').permute(2, 0, 1)
+            # image = torch.from_numpy(image).permute(2, 0, 1)
+
+
         image = F.resize(image, size=input_sizes) #, interpolation=Image.NEAREST)
-        model_in = torch.ByteTensor(torch.ByteStorage.from_buffer(image.tobytes()))
 
-        model_in = model_in.view(image.size[1], image.size[0], len(image.getbands()))
-        model_in = (
-            model_in.permute((2, 0, 1))
-            .contiguous()
-            .float()
-            .div(255)
-            .unsqueeze(0)
-            .numpy()
-        )
 
-        self.save_image(model_in[0], f'camera_observations/{control_object.engine.episode_step}_model_input.jpg')
-        results = self.model(torch.from_numpy(model_in).to(self.device))
+        if image_on_cuda:
+            model_in = image.unsqueeze(0)
+            results = self.model(model_in)
+        else:
+            model_in = torch.ByteTensor(torch.ByteStorage.from_buffer(image.tobytes()))
+            model_in = model_in.view(image.size[1], image.size[0], len(image.getbands()))
+            model_in = (
+                model_in.permute((2, 0, 1))
+                .contiguous()
+                .float()
+                .div(255)
+                .unsqueeze(0)
+                .numpy()
+            )
+
+            self.save_image(model_in[0], f'camera_observations/{control_object.engine.episode_step}_model_input.jpg')
+            results = self.model(torch.from_numpy(model_in).to(self.device))
 
         keypoints = lane_as_segmentation_inference(
             None,
@@ -163,7 +175,7 @@ class PyTorchPipeline:
         # image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
         cv2.imwrite(path, image)
     
-    def infer_offset_center_with_dpatch(self, image, orig_sizes, control_object, generate_patch=True, target=None):
+    def infer_offset_center_with_dpatch(self, image, orig_sizes, control_object, generate_patch=True, target=None, image_on_cuda=False):
         if self.targeted and target is None:
             raise ValueError("Targeted attack requires a target!")
 

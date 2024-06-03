@@ -34,6 +34,23 @@ conda list -e > requirements.txt
 python3 -m metadrive.examples.verify_headless_installation --cuda --camera rgb
 ```
 
+On Windows 11:
+
+Install CUDA: https://developer.nvidia.com/cuda-12-1-0-download-archive?target_os=Windows&target_arch=x86_64&target_version=11&target_type=exe_local
+
+```
+conda create -n ld python=3.11
+conda activate ld
+git clone git@github.com:alexander-toch/metadrive.git ../metadrive
+cd ../metadrive
+pip install -e .
+cd ../lane-detection-e2e-attack
+python -m pip install --upgrade pywin32
+pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+pip install panda3d metadrive-simulator opencv-python numpy pillow torch torchvision adversarial-robustness-toolbox[pytorch_image] timm mmcv tensorboard importmagician cupy-cuda12x 
+pip install cuda-python PyOpenGL PyOpenGL_accelerate
+```
+
 ## Execution
 
 Currently, the attack is started via `rm -rf camera_observations/*.{jpg,npy} && python metadrive_bridge_selfdrive.py`

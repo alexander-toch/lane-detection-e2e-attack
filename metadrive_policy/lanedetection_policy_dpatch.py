@@ -47,22 +47,30 @@ class LaneDetectionPolicy(BasePolicy):
 
         # get RGB camera image from vehicle
         observation = self.camera_observation.observe(self.control_object)
-        image = Image.fromarray((observation["image"][..., -1] * 255).astype(np.uint8))
-        image_size = (image.width, image.height)
+
+        image_on_cuda = get_global_config()["image_on_cuda"]
+
+        if not image_on_cuda:
+            image = Image.fromarray((observation["image"][..., -1] * 255).astype(np.uint8))
+            image_size = (image.width, image.height)
+        else:
+            image = observation["image"][..., -1]
+            image_size = (image.shape[1], image.shape[0])
+
 
         if self.control_object.engine.episode_step < START_ATTACK_AFTER:
             offset_center, lane_heading_theta, keypoints, debug_info = (
-                self.pipeline.infer_offset_center(image, (image_size[1], image_size[0]), self.control_object) # important: swap image_size order
+                self.pipeline.infer_offset_center(image, (image_size[1], image_size[0]), self.control_object, image_on_cuda) # important: swap image_size order
             )
         else:
             # generate a fresh patch every 20 steps
             if self.control_object.engine.episode_step % 20 == 0:
                 offset_center, lane_heading_theta, keypoints, debug_info = (
-                    self.pipeline.infer_offset_center_with_dpatch(image, (image_size[1], image_size[0]), self.control_object, True, target=self.target) # important: swap image_size order
+                    self.pipeline.infer_offset_center_with_dpatch(image, (image_size[1], image_size[0]), self.control_object, True, target=self.target, image_on_cuda=image_on_cuda) # important: swap image_size order
                 )
             else:
                 offset_center, lane_heading_theta, keypoints, debug_info = (
-                    self.pipeline.infer_offset_center_with_dpatch(image, (image_size[1], image_size[0]), self.control_object, False, target=self.target) # important: swap image_size order
+                    self.pipeline.infer_offset_center_with_dpatch(image, (image_size[1], image_size[0]), self.control_object, False, target=self.target, image_on_cuda=image_on_cuda) # important: swap image_size order
                 )
 
         v_heading = self.control_object.heading_theta  # current vehicle heading
@@ -89,7 +97,7 @@ class LaneDetectionPolicy(BasePolicy):
         # TODO: add a flag to enable image saving and interval
         if self.control_object.engine.episode_step % 10 == 0 or True:
             print(f"Step: {self.control_object.engine.episode_step}, offset_center: {offset_center}, lane_heading_theta: {lane_heading_theta}, v_heading: {v_heading}, steering: {steering}")
-            lane_image = draw_lane(image, keypoints, image_size) # swap image_size
+            lane_image = draw_lane(image.get() if image_on_cuda else image, keypoints, image_size) # swap image_size
 
             # lane iamge format is (H, W, C), (720, 1280, 3)
             # debug_info['patch'].shape is (H, W, C)
