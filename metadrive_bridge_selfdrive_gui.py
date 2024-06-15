@@ -22,45 +22,64 @@ from metadrive.component.map.pg_map import MapGenerateMethod
 import torch
 from config import *
 from PIL import Image
-from metadrive_policy.lanedetection_policy_dpatch import LaneDetectionPolicy
+from metadrive_policy.lanedetection_policy_patch_e2e import LaneDetectionPolicyE2E
 import pytorch_auto_drive.functional as F
 from utils import dummy_env
 
-W, H = 1640, 590  #  Desired output size of annotated images
+# W, H = 1640, 590  #  Desired output size of annotated images
+W, H = 1280, 720  #  Desired output size of annotated images
 
 HEADLESS = False
 SAVE_IMAGES = False
 SEED=1235 # was 1234
 MAP_CONFIG = "SCS" # SCS worked quite well
+ATTACK_INDEX = 100
+MAX_STEPS = ATTACK_INDEX + 200
 
 print(f"Using CUDA: {_cuda_enable}")
 print(f"Headless mode: {HEADLESS}")
 
+def run_simulation(env):
+    env.reset()
+    env.current_track_agent.expert_takeover = True
+    for i in range(10):
+        o, r, tm, tc, infos = env.step([0, 1])
+    assert isinstance(o, dict)
 
-# from https://metadrive-simulator.readthedocs.io/en/latest/points_and_lines.html#points
-def make_line(x_offset, height, y_dir=1, color=(1, 105 / 255, 180 / 255)):
-    points = [(x_offset + x, x * y_dir, height * x / 10 + height) for x in range(10)]
-    colors = [
-        np.clip(np.array([*color, 1]) * (i + 1) / 11, 0.0, 1.0) for i in range(10)
-    ]
-    if y_dir < 0:
-        points = points[::-1]
-        colors = colors[::-1]
-    return points, colors
+    step_index = 0
+    while True:
+        o, r, tm, tc, info = env.step([0,0])
 
+        if not HEADLESS:
+            env.render(
+                text={
+                    "Auto-Drive (Switch mode: T)": (
+                        "on" if env.current_track_agent.expert_takeover else "off"
+                    ),
+                    "Keyboard Control": "W,A,S,D",
+                }
+            )
 
-def draw_keypoints(drawer, keypoints):
-    line_1, color_1 = make_line(6, 0.5, 0.01 * i)  # define line 1 for test
-    line_2, color_2 = make_line(6, 0.5, -0.01 * i)  # define line 2 for test
-    points = line_1 + line_2  # create point list
-    colors = color_1 + color_2
-    drawer.reset()
-    drawer.draw_points(points, colors)  # draw points
+        if SAVE_IMAGES:
+            if step_index % 20 == 0:
+                cv2.imwrite(
+                    f"camera_observations/{str(step_index)}.jpg",
+                    (
+                        o["image"].get()[..., -1]
+                        if env.config["image_on_cuda"]
+                        else o["image"][..., -1]
+                    )
+                    * 255,
+                )
+
+        if tm or tc or step_index >= MAX_STEPS:
+            # env.reset(env.current_seed + 1)
+            print(f"Simulation ended at step {step_index}")
+            break            
+        step_index += 1
 
 
 if __name__ == "__main__":
-
-    
     map_config = {
         "config": MAP_CONFIG, # S=Straight, C=Circular/Curve
         BaseMap.GENERATE_TYPE: MapGenerateMethod.BIG_BLOCK_SEQUENCE,
@@ -70,7 +89,6 @@ if __name__ == "__main__":
     }
 
     config = dict(
-        enable_dirty_road_patch_attack=True,
         use_render=not HEADLESS,
         window_size=(W, H),
         sensors={
@@ -80,7 +98,7 @@ if __name__ == "__main__":
         vehicle_config={
             "image_source": "rgb_camera",
         },
-        agent_policy=LaneDetectionPolicy,
+        agent_policy=LaneDetectionPolicyE2E,
         start_seed=SEED,
         image_on_cuda=True,
         image_observation=True,
@@ -98,43 +116,14 @@ if __name__ == "__main__":
         manual_control=True,
     )
 
+    # ATTACK STEP 1: Drive without attack and generate the 
+    config["enable_dirty_road_patch_attack"] = False
+    config["dirty_road_patch_attack_step_index"] = ATTACK_INDEX
+
     env = MetaDriveEnv(config)
+    run_simulation(env)
+    env.close()
 
-    try:
-        env.reset()
-        env.current_track_agent.expert_takeover = True
-        for i in range(10):
-            o, r, tm, tc, infos = env.step([0, 1])
-        assert isinstance(o, dict)
-
-        step_index = 0
-        while True:
-            o, r, tm, tc, info = env.step([0,0])
-
-            if not HEADLESS:
-                env.render(
-                    text={
-                        "Auto-Drive (Switch mode: T)": (
-                            "on" if env.current_track_agent.expert_takeover else "off"
-                        ),
-                        "Keyboard Control": "W,A,S,D",
-                    }
-                )
-
-            if SAVE_IMAGES:
-                if step_index % 20 == 0:
-                    cv2.imwrite(
-                        f"camera_observations/{str(step_index)}.jpg",
-                        (
-                            o["image"].get()[..., -1]
-                            if env.config["image_on_cuda"]
-                            else o["image"][..., -1]
-                        )
-                        * 255,
-                    )
-
-            if tm or tc:
-                env.reset(env.current_seed + 1)            
-            step_index += 1
-    finally:
-        env.close()
+    config["enable_dirty_road_patch_attack"] = True
+    env = MetaDriveEnv(config)
+    run_simulation(env)

@@ -17,15 +17,18 @@ from lanefitting import draw_lane
 
 # TARGET=None
 TARGET=np.load("attack/targets/turn_right.npy", allow_pickle=True).item()
-START_ATTACK_AFTER = 500
+START_ATTACK_AFTER = 50
+REGENERATE_INTERVAL = 100
 
 
 class LaneDetectionPolicy(BasePolicy):
     MAX_SPEED = 100  # km/h
-    NORMAL_SPEED = 30  # km/h
+    NORMAL_SPEED = 50  # km/h
     ACC_FACTOR = 1.0
     DEACC_FACTOR = -5
     DELTA = 10.0  # Exponent of the velocity term
+    # TODO: scale this proportional to offset
+    STEERING_VALUE_RAD = np.deg2rad(60)
 
     def __init__(self, control_object, random_seed=None, config=None):
         super(LaneDetectionPolicy, self).__init__(control_object, random_seed, config)
@@ -92,7 +95,7 @@ class LaneDetectionPolicy(BasePolicy):
             )
         else:
             # generate a fresh patch every 20 steps
-            if self.control_object.engine.episode_step % 20 == 0:
+            if self.control_object.engine.episode_step % REGENERATE_INTERVAL == 0:
                 offset_center, lane_heading_theta, keypoints, debug_info = (
                     self.pipeline.infer_offset_center_with_dpatch(image, (image_size[1], image_size[0]), self.control_object, True, target=self.target, image_on_cuda=image_on_cuda) # important: swap image_size order
                 )
@@ -106,16 +109,15 @@ class LaneDetectionPolicy(BasePolicy):
         #     -wrap_to_pi(lane_heading_theta - v_heading)
         # )
 
-        STEERING_VALUE_RAD = np.deg2rad(15)
         self.target_speed = self.NORMAL_SPEED
         if offset_center is None:
             steering = self.lateral_pid.get_result(0)
             # brake if no lane detected
             self.target_speed = 0.01
         elif offset_center > 0.01:
-            steering = self.lateral_pid.get_result(-wrap_to_pi(-STEERING_VALUE_RAD)) # radian in range (-pi, pi]
+            steering = self.lateral_pid.get_result(-wrap_to_pi(-self.STEERING_VALUE_RAD)) # radian in range (-pi, pi]
         elif offset_center < -0.01:
-            steering = self.lateral_pid.get_result(-wrap_to_pi(+STEERING_VALUE_RAD)) # radian in range (-pi, pi]
+            steering = self.lateral_pid.get_result(-wrap_to_pi(+self.STEERING_VALUE_RAD)) # radian in range (-pi, pi]
         else:
             steering = self.lateral_pid.get_result(0)
 
@@ -125,7 +127,7 @@ class LaneDetectionPolicy(BasePolicy):
         # TODO: add a flag to enable image saving and interval
         if self.control_object.engine.episode_step % 10 == 0:
             print(f"Step: {self.control_object.engine.episode_step}, offset_center: {offset_center}, lane_heading_theta: {lane_heading_theta}, v_heading: {v_heading}, steering: {steering}")
-            lane_image = draw_lane(image.get() if image_on_cuda else image, keypoints, image_size) # swap image_size
+            lane_image = draw_lane(image.get() * 255 if image_on_cuda else image, keypoints, image_size) # swap image_size
 
             # lane iamge format is (H, W, C), (720, 1280, 3)
             # debug_info['patch'].shape is (H, W, C)

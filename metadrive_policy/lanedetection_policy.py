@@ -65,14 +65,14 @@ class LaneDetectionPolicy(BasePolicy):
         # action = [0, self.acceleration()] # for disbling steering
 
         # TODO: add a flag to enable image saving
-        if self.control_object.engine.episode_step % 10 == 0:
-            print(f"Step: {self.control_object.engine.episode_step}, offset_center: {offset_center}, lane_heading_theta: {lane_heading_theta}, v_heading: {v_heading}, steering: {steering}")
-            lane_image = draw_lane(image, keypoints, image_size) # swap image_size
-            if lane_image is not None:
-                cv2.imwrite(
-                    f"camera_observations/lane_{str(self.control_object.engine.episode_step)}.jpg",
-                    lane_image
-                )
+        # if self.control_object.engine.episode_step % 10 == 0:
+        #     print(f"Step: {self.control_object.engine.episode_step}, offset_center: {offset_center}, lane_heading_theta: {lane_heading_theta}, v_heading: {v_heading}, steering: {steering}")
+        #     lane_image = draw_lane(image, keypoints, image_size) # swap image_size
+        #     if lane_image is not None:
+        #         cv2.imwrite(
+        #             f"camera_observations/lane_{str(self.control_object.engine.episode_step)}.jpg",
+        #             lane_image
+        #         )
 
         return action
 

@@ -26,7 +26,7 @@ srun -N 1 -n 1 --gpus-per-node=1 --ntasks-per-node=1 --pty bash -i
 conda create -n ld python=3.9 
 conda activate ld
 conda install cuda-toolkit==11.4 cudatoolkit=11.4 -c pytorch -c nvidia
-pip install panda3d metadrive-simulator opencv-python numpy pillow torch ==2.0.1 torchvision adversarial-robustness-toolbox[pytorch_image] timm mmcv tensorboard importmagician
+pip install jsonargparse panda3d metadrive-simulator opencv-python numpy pillow torch ==2.0.1 torchvision adversarial-robustness-toolbox[pytorch_image] timm mmcv tensorboard importmagician
 pip install numpy --upgrade
 pip install -U openmim
 mim install  mmcv
@@ -46,7 +46,7 @@ cd ../metadrive
 pip install -e .
 cd ../lane-detection-e2e-attack
 python -m pip install --upgrade pywin32
-pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+pip3 install jsonargparse torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 pip install panda3d metadrive-simulator opencv-python numpy pillow torch torchvision adversarial-robustness-toolbox[pytorch_image] timm mmcv tensorboard importmagician cupy-cuda12x 
 pip install cuda-python PyOpenGL PyOpenGL_accelerate
 ```

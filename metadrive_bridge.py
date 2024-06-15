@@ -1,119 +1,99 @@
-"""
-Please feel free to run this script to enjoy a journey by keyboard!
-Remember to press H to see help message!
 
-Note: This script require rendering, please following the installation instruction to setup a proper
-environment that allows popping up an window.
-"""
-
-import argparse
-from panda3d.core import Texture, GraphicsOutput
-
+from dataclasses import dataclass
 import cv2
-import numpy as np
-
 from metadrive import MetaDriveEnv
 from metadrive.component.sensors.rgb_camera import RGBCamera
 from metadrive.constants import HELP_MESSAGE
 from metadrive.component.map.base_map import BaseMap
 from metadrive.component.sensors.base_camera import _cuda_enable
 from metadrive.component.map.pg_map import MapGenerateMethod
-from utils import dummy_env
-
-import torch
-from inference import ONNXPipeline
-from config import *
-from PIL import Image
-import pytorch_auto_drive.functional as F
-
-W, H = 1280, 720  #  Desired output size of annotated images
-
-SAVE_IMAGES = True
-HEADLESS = True
-STEPS = 20 * 300
-
-print(f"Using CUDA: {_cuda_enable}")
-print(f"Headless mode: {HEADLESS}")
 
 
-# from https://metadrive-simulator.readthedocs.io/en/latest/points_and_lines.html#points
-def make_line(x_offset, height, y_dir=1, color=(1, 105 / 255, 180 / 255)):
-    points = [(x_offset + x, x * y_dir, height * x / 10 + height) for x in range(10)]
-    colors = [
-        np.clip(np.array([*color, 1]) * (i + 1) / 11, 0.0, 1.0) for i in range(10)
-    ]
-    if y_dir < 0:
-        points = points[::-1]
-        colors = colors[::-1]
-    return points, colors
+from metadrive_policy.lanedetection_policy_patch_e2e import LaneDetectionPolicyE2E
+from metadrive_policy.lanedetection_policy_dpatch import LaneDetectionPolicy
 
+@dataclass
+class Settings:
+    seed: int = 1235
+    num_scenarios: int = 1
+    map_config: str = "SCS"
+    headless_rendering: bool = False
+    save_images: bool = False
+    attack_at_step: int = 6000
+    max_steps: int = 5000
+    start_with_manual_control: bool = False
+    simulator_window_size: tuple = (1280, 720) # (width, height)
+    policy: str = "LaneDetectionPolicyE2E"
 
-def draw_keypoints(drawer, keypoints):
-    line_1, color_1 = make_line(6, 0.5, 0.01 * i)  # define line 1 for test
-    line_2, color_2 = make_line(6, 0.5, -0.01 * i)  # define line 2 for test
-    points = line_1 + line_2  # create point list
-    colors = color_1 + color_2
-    drawer.reset()
-    drawer.draw_points(points, colors)  # draw points
+class MetaDriveBridge:
+    def __init__(self, settings: Settings):
+        self.settings = settings
+        self.map_config = {
+            "config": self.settings.map_config, # S=Straight, C=Circular/Curve
+            BaseMap.GENERATE_TYPE: MapGenerateMethod.BIG_BLOCK_SEQUENCE,
+            # BaseMap.GENERATE_CONFIG: 3,
+            BaseMap.LANE_WIDTH: 3.5,
+            BaseMap.LANE_NUM: 2,
+        }
 
+        self.policy = LaneDetectionPolicyE2E if self.settings.policy == "LaneDetectionPolicyE2E" else LaneDetectionPolicy
 
-if __name__ == "__main__":
-    # Adapted from OpenPilot's bridge
-    inference_pipeline = ONNXPipeline()
+        self.config  = dict(
+            use_render=not self.settings.headless_rendering,
+            window_size=self.settings.simulator_window_size,
+            sensors={
+                "rgb_camera": (RGBCamera, self.settings.simulator_window_size[0], self.settings.simulator_window_size[1]),
+            },
+            interface_panel=[],
+            vehicle_config={
+                "image_source": "rgb_camera",
+            },
+            agent_policy=self.policy,
+            start_seed=self.settings.seed,
+            image_on_cuda=True,
+            image_observation=True,
+            out_of_route_done=True,
+            on_continuous_line_done=True,
+            crash_vehicle_done=True,
+            crash_object_done=True,
+            crash_human_done=True,
+            traffic_density=0.0,
+            map_config=self.map_config,
+            num_scenarios=self.settings.num_scenarios,
+            decision_repeat=1,
+            preload_models=False,
+            manual_control=True,
+            dirty_road_patch_attack_step_index=self.settings.attack_at_step,
+            force_map_generation=True # disables the PG Map cache
+        )
 
-    map_config = {
-        "config": "SSSSSS",
-        BaseMap.GENERATE_TYPE: MapGenerateMethod.BIG_BLOCK_SEQUENCE,
-        # BaseMap.GENERATE_CONFIG: 3,
-        BaseMap.LANE_WIDTH: 3.5,
-        BaseMap.LANE_NUM: 2,
-    }
+    def run(self):
+        # TODO: use settings to configure attack
+        # ATTACK STEP 1: Drive without attack and generate the patch
+        self.config["enable_dirty_road_patch_attack"] = False
 
-    config = dict(
-        use_render=not HEADLESS,
-        window_size=(W, H),
-        sensors={
-            "rgb_camera": (RGBCamera, W, H),
-        },
-        interface_panel=[],
-        vehicle_config={
-            "image_source": "rgb_camera",
-        },
-        image_on_cuda=False,
-        image_observation=True,
-        out_of_route_done=False,
-        on_continuous_line_done=False,
-        crash_vehicle_done=False,
-        crash_object_done=False,
-        traffic_density=0.0,  # traffic is incredibly expensive
-        # map_config=create_map(),
-        map_config=map_config,
-        # map=4,  # seven block
-        num_scenarios=1,
-        decision_repeat=1,
-        # physics_world_step_size=self.TICKS_PER_FRAME / 100,
-        # preload_models=False,
-        manual_control=True,
-    )
+        env = MetaDriveEnv(self.config)
+        self.run_simulation(env)
 
-    # dummy_env()
+        # ATTACK STEP 2: Drive with mounted patch
+        env.engine.global_config["enable_dirty_road_patch_attack"] = True
+        
+        
+        self.run_simulation(env)
 
-    env = MetaDriveEnv(config)
-
-    try:
-        env.reset()
+    def run_simulation(self, env: MetaDriveEnv):
+        env.reset(self.settings.seed)
+        env.current_track_agent.expert_takeover = not self.settings.start_with_manual_control
+        
         for i in range(10):
-            o, r, tm, tc, i = env.step([0, 1])
+            o, r, tm, tc, infos = env.step([0, 1])
         assert isinstance(o, dict)
-        point_drawer = env.engine.make_point_drawer(scale=1)  # create a point drawer
-        print(HELP_MESSAGE)
 
-        env.agent.expert_takeover = True
+        step_index = 0
+        while True:
+            o, r, tm, tc, info = env.step([0,0])
 
-        for i in range(1, STEPS):
-            o, r, tm, tc, info = env.step([0, 0])
-
-            if not HEADLESS:
+            if not self.settings.headless_rendering:
                 env.render(
                     text={
                         "Auto-Drive (Switch mode: T)": (
@@ -123,52 +103,10 @@ if __name__ == "__main__":
                     }
                 )
 
-            try:
-                if i % 20 == 0:
-                    image = Image.fromarray(
-                        (o["image"][..., -1] * 255).astype(np.uint8)
-                    )
-                    orig_sizes = (image.height, image.width)
-                    original_img = F.to_tensor(image).clone().unsqueeze(0)
-                    image = F.resize(image, size=input_sizes)
-
-                    model_in = torch.ByteTensor(
-                        torch.ByteStorage.from_buffer(image.tobytes())
-                    )
-
-                    model_in = model_in.view(
-                        image.size[1], image.size[0], len(image.getbands())
-                    )
-                    model_in = (
-                        model_in.permute((2, 0, 1))
-                        .contiguous()
-                        .float()
-                        .div(255)
-                        .unsqueeze(0)
-                        .numpy()
-                    )
-
-                    results, keypoints = inference_pipeline.inference(
-                        model_in, original_img, orig_sizes
-                    )
-
-                    # TODO: visualize keypoints: https://metadrive-simulator.readthedocs.io/en/latest/points_and_lines.html#points
-                    # draw_keypoints(point_drawer, keypoints)
-
-                    # cv2.imshow("Inferred image", results[0])
-                    if SAVE_IMAGES:
-                        cv2.imwrite(
-                            f"camera_observations/{str(i)}_inf.jpg",
-                            results[0],
-                        )
-
-            except Exception as e:
-                print(e)
-
-            if SAVE_IMAGES:
-                if i % 20 == 0:
+            if self.settings.save_images:
+                if step_index % 20 == 0:
                     cv2.imwrite(
-                        f"camera_observations/{str(i)}.jpg",
+                        f"camera_observations/{str(step_index)}.jpg",
                         (
                             o["image"].get()[..., -1]
                             if env.config["image_on_cuda"]
@@ -177,15 +115,10 @@ if __name__ == "__main__":
                         * 255,
                     )
 
-            # cv2.waitKey(1)
-
-            if (
-                (tm or tc)
-                and info["arrive_dest"]
-                and env.current_seed + 1
-                < env.config["start_seed"] + env.config["num_scenarios"]
-            ):
-                env.reset(env.current_seed + 1)
-                env.current_track_agent.expert_takeover = True
-    finally:
-        env.close()
+            if tm or tc or step_index >= self.settings.max_steps:
+                print(f"Simulation ended at step {step_index}")
+                if env.current_seed + 1 < self.settings.seed + self.settings.num_scenarios:
+                    env.reset(env.current_seed + 1)
+                else:
+                    break            
+            step_index += 1

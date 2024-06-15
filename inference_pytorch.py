@@ -178,25 +178,35 @@ class PyTorchPipeline:
     def infer_offset_center_with_dpatch(self, image, orig_sizes, control_object, generate_patch=True, target=None, image_on_cuda=False):
         if self.targeted and target is None:
             raise ValueError("Targeted attack requires a target!")
+        
+        if image_on_cuda:
+            # image arrives in (H, W, C), needs to have [C, H, W] format
+            image = torch.as_tensor(image, device='cuda').permute(2, 0, 1)
+            # image = torch.from_numpy(image).permute(2, 0, 1)
+
 
         image = F.resize(image, size=input_sizes) #, interpolation=Image.NEAREST)
-        model_in = torch.ByteTensor(torch.ByteStorage.from_buffer(image.tobytes()))
 
-        model_in = model_in.view(image.size[1], image.size[0], len(image.getbands()))
-        model_in = (
-            model_in.permute((2, 0, 1))
-            .contiguous()
-            .float()
-            .div(255)
-            .unsqueeze(0)
-            .numpy()
-        )
+
+        if image_on_cuda:
+            model_in = image.unsqueeze(0)
+        else:
+            model_in = torch.ByteTensor(torch.ByteStorage.from_buffer(image.tobytes()))
+            model_in = model_in.view(image.size[1], image.size[0], len(image.getbands()))
+            model_in = (
+                model_in.permute((2, 0, 1))
+                .contiguous()
+                .float()
+                .div(255)
+                .unsqueeze(0)
+                .numpy()
+            ) 
         
         if generate_patch or self.current_patch is None:
             if self.targeted:
-                self.current_patch = self.attack.generate(x=model_in.copy(), y=target)[0]
+                self.current_patch = self.attack.generate(x=model_in.cpu().numpy() if image_on_cuda else model_in.copy(), y=target)[0]
             else:
-                self.current_patch = self.attack.generate(x=model_in.copy())[0]
+                self.current_patch = self.attack.generate(x=model_in.cpu().numpy() if image_on_cuda else model_in.copy())[0]
             # self.save_image(self.current_patch, f'camera_observations/{control_object.engine.episode_step}_patch.jpg', sizes=(self.current_patch.shape[1], self.current_patch.shape[2]))
         
         patch = self.current_patch
@@ -204,11 +214,11 @@ class PyTorchPipeline:
         # place patch
         x_1, y_1 = self.patch_location
         x_2, y_2 = x_1 + patch.shape[2], y_1 + patch.shape[1]
-        model_in[0][:, y_1:y_2, x_1:x_2] = patch
+        model_in[0][:, y_1:y_2, x_1:x_2] = torch.from_numpy(patch).to(model_in.device) if image_on_cuda else patch
 
         # self.save_image(model_in[0], f'camera_observations/{control_object.engine.episode_step}_model_input.jpg')
 
-        results = self.model(torch.from_numpy(model_in).to(self.device))
+        results = self.model(model_in) if image_on_cuda else self.model(torch.from_numpy(model_in).to(self.device))
 
         keypoints = lane_as_segmentation_inference(
             None,
