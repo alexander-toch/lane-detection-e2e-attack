@@ -1,5 +1,5 @@
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import cv2
 from metadrive import MetaDriveEnv
 from metadrive.component.sensors.rgb_camera import RGBCamera
@@ -12,6 +12,13 @@ from metadrive.component.map.pg_map import MapGenerateMethod
 from metadrive_policy.lanedetection_policy_patch_e2e import LaneDetectionPolicyE2E
 from metadrive_policy.lanedetection_policy_dpatch import LaneDetectionPolicy
 
+
+
+@dataclass
+class AttackConfig:
+    attack_at_step: int = 6000
+    two_pass_attack: bool = False
+
 @dataclass
 class Settings:
     seed: int = 1235
@@ -19,11 +26,11 @@ class Settings:
     map_config: str = "SCS"
     headless_rendering: bool = False
     save_images: bool = False
-    attack_at_step: int = 6000
     max_steps: int = 5000
     start_with_manual_control: bool = False
     simulator_window_size: tuple = (1280, 720) # (width, height)
     policy: str = "LaneDetectionPolicyE2E"
+    attack_config: AttackConfig | None = field(default_factory=AttackConfig)
 
 class MetaDriveBridge:
     def __init__(self, settings: Settings):
@@ -44,7 +51,6 @@ class MetaDriveBridge:
             sensors={
                 "rgb_camera": (RGBCamera, self.settings.simulator_window_size[0], self.settings.simulator_window_size[1]),
             },
-            interface_panel=[],
             vehicle_config={
                 "image_source": "rgb_camera",
             },
@@ -63,22 +69,34 @@ class MetaDriveBridge:
             decision_repeat=1,
             preload_models=False,
             manual_control=True,
-            dirty_road_patch_attack_step_index=self.settings.attack_at_step,
-            force_map_generation=True # disables the PG Map cache
+            force_map_generation=True, # disables the PG Map cache
+            show_fps=True,
+            show_interface_navi_mark=False,
+            interface_panel=["dashboard", "rgb_camera"],
         )
 
     def run(self):
-        # TODO: use settings to configure attack
-        # ATTACK STEP 1: Drive without attack and generate the patch
-        self.config["enable_dirty_road_patch_attack"] = False
+        if self.settings.attack_config is not None:
+            self.config["dirty_road_patch_attack_step_index"]= self.settings.attack_config.attack_at_step
+            if self.settings.attack_config.two_pass_attack:
+                self.run_two_pass_attack()
+            else:
+                self.config["enable_dirty_road_patch_attack"] = True
+                env = MetaDriveEnv(self.config)
+                self.run_simulation(env)
+        else:
+            env = MetaDriveEnv(self.config)
+            self.run_simulation(env)
 
+    def run_two_pass_attack(self):
+        # ATTACK PASS 1: Drive without attack and generate the patch
+        self.config["enable_dirty_road_patch_attack"] = False
         env = MetaDriveEnv(self.config)
         self.run_simulation(env)
 
-        # ATTACK STEP 2: Drive with mounted patch
+        # ATTACK PASS 2: Drive with mounted patch
         env.engine.global_config["enable_dirty_road_patch_attack"] = True
-        
-        
+        env.engine.global_config["dirty_road_patch_attack_step_index"] = -1
         self.run_simulation(env)
 
     def run_simulation(self, env: MetaDriveEnv):

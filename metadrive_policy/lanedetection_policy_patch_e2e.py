@@ -68,14 +68,11 @@ class LaneDetectionPolicyE2E(LaneDetectionPolicy):
             )
 
         if self.control_object.engine.episode_step == attack_step_index:
-            _, _, _, debug_info = (
+            _, _, _, patch_object = (
                 self.pipeline.infer_offset_center_with_dpatch(image, (image_size[1], image_size[0]), self.control_object, True, target=self.target, image_on_cuda=image_on_cuda) # important: swap image_size order
             )
 
-            patch = {
-                'location': debug_info['location'],
-                'patch': debug_info['patch'],
-            }
+            self.control_object.engine.dirty_road_patch_object = patch_object
 
             # pickle.dump(patch, open(f"camera_observations/seed_{self.control_object.engine.seed}_patch.pkl", "wb"))
 

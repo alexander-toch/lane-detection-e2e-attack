@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from random import randint
 import cv2
 from attack.pytorch_auto_drive.utils.runners.base import BaseTrainer
@@ -35,6 +36,14 @@ elif MODEL == "scnn":
     CONFIG=os.path.join(script_dir, 'attack/pytorch_auto_drive/configs/lane_detection/scnn/resnet50_culane.py').replace('\\','/')
     CHECKPOINT=os.path.join(script_dir, '../resnet50_scnn_culane_20210311.pt').replace('\\','/')
 
+@dataclass
+class DirtyRoadPatch:
+    patch: np.ndarray
+    location: tuple
+    probmaps: torch.Tensor
+    original_image_sizes: tuple = None
+    input_image_sizes: tuple = None
+
 class PyTorchPipeline:
     def __init__(self, model_path=ONNX_MODEL_PATH, targeted=False):
         self.cfg = read_config(CONFIG)
@@ -48,8 +57,8 @@ class PyTorchPipeline:
             self.device = torch.device(f"cuda:{cuda_idx}")
 
 
-        self.patch_size = (50,50) # (height, width)
-        self.patch_location=(380,237) # in format (W, H). (800, 288) is input size for resa
+        self.patch_size = (120,300) # (height, width)
+        self.patch_location=(200,160) # in format (W, H). (800, 288) is input size for resa
         brightness_range= (0.8, 1.0)
         rotation_weights = (0.4, 0.2, 0.2, 0.2)
         optimizer = BaseTrainer.get_optimizer(self.cfg['optimizer'], self.model)
@@ -80,7 +89,7 @@ class PyTorchPipeline:
 
         self.targeted = targeted
         self.attack = MyRobustDPatch(estimator=classifier, 
-                        max_iter=50,
+                        max_iter=90,
                         sample_size=1,
                         patch_shape=(3, self.patch_size[0], self.patch_size[1]), 
                         patch_location=self.patch_location,
@@ -130,6 +139,7 @@ class PyTorchPipeline:
         if image_on_cuda:
             model_in = image.unsqueeze(0)
             results = self.model(model_in)
+            self.save_image(model_in[0].cpu().numpy(), f'camera_observations/{control_object.engine.episode_step}_model_input.jpg')
         else:
             model_in = torch.ByteTensor(torch.ByteStorage.from_buffer(image.tobytes()))
             model_in = model_in.view(image.size[1], image.size[0], len(image.getbands()))
@@ -142,7 +152,7 @@ class PyTorchPipeline:
                 .numpy()
             )
 
-            # self.save_image(model_in[0], f'camera_observations/{control_object.engine.episode_step}_model_input.jpg')
+            self.save_image(model_in[0], f'camera_observations/{control_object.engine.episode_step}_model_input.jpg')
             results = self.model(torch.from_numpy(model_in).to(self.device))
 
         keypoints = lane_as_segmentation_inference(
@@ -216,7 +226,7 @@ class PyTorchPipeline:
         x_2, y_2 = x_1 + patch.shape[2], y_1 + patch.shape[1]
         model_in[0][:, y_1:y_2, x_1:x_2] = torch.from_numpy(patch).to(model_in.device) if image_on_cuda else patch
 
-        # self.save_image(model_in[0], f'camera_observations/{control_object.engine.episode_step}_model_input.jpg')
+        # self.save_image(model_in[0].cpu().numpy(), f'camera_observations/{control_object.engine.episode_step}_model_input.jpg')
 
         results = self.model(model_in) if image_on_cuda else self.model(torch.from_numpy(model_in).to(self.device))
 
@@ -247,10 +257,13 @@ class PyTorchPipeline:
         if generate_patch:
             cv2.imwrite(f'camera_observations/{control_object.engine.episode_step}_patch.jpg', patch)
 
-        debug_info = {
-            'patch': patch,
-            'location': (int(self.patch_location[0] * scale_factor_width), int(self.patch_location[1] * scale_factor_height)), # format (x, y)
-            'probmaps': results,
-        }
+        scaled_location = (int(self.patch_location[0] * scale_factor_width), int(self.patch_location[1] * scale_factor_height)) # format (x, y)
+        patch_object: DirtyRoadPatch = DirtyRoadPatch(
+            patch, 
+            scaled_location, 
+            results,
+            orig_sizes,
+            input_sizes
+        )
 
-        return off_center, lane_heading_theta, keypoints[0], debug_info
+        return off_center, lane_heading_theta, keypoints[0], patch_object
