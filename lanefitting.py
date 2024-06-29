@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
 
-def get_offset_center(keypoints, image_size: tuple) -> float:
+def get_offset_center(keypoints, image_size: tuple, transform_matrix=None) -> float:
     """Calculates the offset from the center of the lane in meters
 
     Args:
@@ -15,8 +15,9 @@ def get_offset_center(keypoints, image_size: tuple) -> float:
         return None, None, None
 
     # get the lanes to the left and right of the car
-    matrix, _ = get_transform_matrix(image_size)
-    left_lane_bev, right_lane_bev, _ = get_ego_lanes(keypoints, matrix, image_size)
+    if transform_matrix is None:
+        transform_matrix, _ = get_transform_matrix(image_size)
+    left_lane_bev, right_lane_bev, _ = get_ego_lanes(keypoints, transform_matrix, image_size)
 
     left_lane_poly = fit_lane(left_lane_bev)
     right_lane_poly = fit_lane(right_lane_bev)
@@ -29,7 +30,7 @@ def get_offset_center(keypoints, image_size: tuple) -> float:
     current_center_x = left_lane_start + (right_lane_start - left_lane_start) / 2
     desired_center_x = width / 2.0
 
-    xm_per_pix = 0.00106  # meters per pixel in x dimension
+    xm_per_pix = 0.00106  # meters per pixel in x dimension # TODO: is this needed?
     off_center = round(
         (current_center_x - desired_center_x) * xm_per_pix, 4
     )  # assume camera is in the center of the car
@@ -62,14 +63,15 @@ def get_ego_lanes(lanes, transformation_matrix, image_size: tuple):
     middle = image_size[0]/2
 
     for i, lane in enumerate(lanes_transformed):
-        avg = np.average(lane[0])
+        avg = np.average(lane.T[0])
+        # print(f"Lane {i}: Average: {avg}, Middle: {middle}, Left: {np.average(left_lane[0])}, Right: {np.average(right_lane[0])}")
 
-        if avg < middle and avg > np.average(left_lane[0]):
+        if avg < middle and avg > np.average(left_lane.T[0]):
             left_lane = np.float32(lane)
             selected_indices[0] = i
             continue
 
-        if avg > middle and avg < np.average(right_lane[0]):
+        if avg > middle and avg < np.average(right_lane.T[0]):
             right_lane = np.float32(lane)
             selected_indices[1] = i
             continue
@@ -169,15 +171,20 @@ def calculate_radius(left_lane_poly, right_lane_poly, image_size: tuple):
     return radius
 
 
-def draw_lane(image, keypoints, image_size: tuple):
+def draw_lane(image, keypoints, image_size: tuple, transform_matrix=None):
     if len(keypoints) < 2:
         print("No lanes detected")
         image_np = np.array(image)
         cv2.putText(image_np, f'NO LANES DETECTED', (10, 60), cv2.FONT_HERSHEY_SIMPLEX , 2, (0, 0, 255), 2, cv2.LINE_AA)
         return image_np
 
-    matrix, matrix_inv = get_transform_matrix(image_size)
-    left_lane_bev, right_lane_bev, selected_indices = get_ego_lanes(keypoints, matrix, image_size)
+    if transform_matrix is None: 
+        transform_matrix, _ = get_transform_matrix(image_size)
+
+    left_lane_bev, right_lane_bev, selected_indices = get_ego_lanes(keypoints, transform_matrix, image_size)
+
+    if (selected_indices[0] == selected_indices[1]):
+        print("Warning: ego lane indexes are the same, this should not happen!")
 
     left_lane_poly = fit_lane(left_lane_bev)
     right_lane_poly = fit_lane(right_lane_bev)
@@ -215,11 +222,93 @@ def draw_lane(image, keypoints, image_size: tuple):
     right_lane_start = right_lane_poly(height)
     current_center_x = left_lane_start + (right_lane_start - left_lane_start) / 2
     cv2.circle(image_np, (int(current_center_x), int(height-3)), 3, (255, 255, 255), -1, cv2.LINE_AA)
-    # end_point_transformed = perspective_warp(np.array([debug_info[3]]), matrix_inv)[0]
+    # end_point_transformed = perspective_warp(np.array([debug_info[3]]), transform_matrix_inv)[0]
     # cv2.arrowedLine(image_np, (int(width/2), int(height-3)), np.int_(end_point_transformed), (0, 0, 0), 1, cv2.LINE_AA)  
 
     color_fill_image = cv2.fillPoly(color_fill_image, [pts], (0, 255, 0))  
-    color_fill_image_transformed = cv2.warpPerspective(color_fill_image, matrix_inv, (width, height))
+    color_fill_image_transformed = cv2.warpPerspective(color_fill_image, transform_matrix, (width, height), flags=cv2.WARP_INVERSE_MAP)
     result = cv2.addWeighted(image_np, 1, color_fill_image_transformed, 0.2, 0, dtype=cv2.CV_8U)
 
     return result
+
+
+class Camera:
+  K = np.zeros([3, 3])
+  R = np.zeros([3, 3])
+  t = np.zeros([3, 1])
+  P = np.zeros([3, 4])
+
+  def setK(self, fx, fy, px, py):
+    self.K[0, 0] = fx
+    self.K[1, 1] = fy
+    self.K[0, 2] = px
+    self.K[1, 2] = py
+    self.K[2, 2] = 1.0
+
+  def setR(self, y, p, r):
+
+    Rz = np.array([[np.cos(-y), -np.sin(-y), 0.0], [np.sin(-y), np.cos(-y), 0.0], [0.0, 0.0, 1.0]])
+    Ry = np.array([[np.cos(-p), 0.0, np.sin(-p)], [0.0, 1.0, 0.0], [-np.sin(-p), 0.0, np.cos(-p)]])
+    Rx = np.array([[1.0, 0.0, 0.0], [0.0, np.cos(-r), -np.sin(-r)], [0.0, np.sin(-r), np.cos(-r)]])
+    Rs = np.array([[0.0, -1.0, 0.0], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0]]) # switch axes (x = -y, y = -z, z = x)
+    self.R = Rs.dot(Rz.dot(Ry.dot(Rx)))
+
+  def setT(self, XCam, YCam, ZCam):
+    X = np.array([XCam, YCam, ZCam])
+    self.t = -self.R.dot(X)
+
+  def updateP(self):
+    Rt = np.zeros([3, 4])
+    Rt[0:3, 0:3] = self.R
+    Rt[0:3, 3] = self.t
+    self.P = self.K.dot(Rt)
+
+  def __init__(self, config):
+    self.setK(config["fx"], config["fy"], config["px"], config["py"])
+    self.setR(np.deg2rad(config["yaw"]), np.deg2rad(config["pitch"]), np.deg2rad(config["roll"]))
+    DEBUG_SCALE_FACTOR = 8.0
+    self.setT(config["XCam"], config["YCam"] * DEBUG_SCALE_FACTOR, config["ZCam"] * DEBUG_SCALE_FACTOR)
+    self.updateP()
+
+def get_ipm_via_camera_config(image, fx, fy, res=1):
+    """
+    Get the Inverse Perspective Mapping (IPM) of an image using a camera configuration
+    fx: focal length in x-direction [px]
+    fy: focal length in y-direction [px]
+    res [px/m]
+    """
+    width, height = image.shape[1], image.shape[0]
+
+    config = {
+        "fx": fx,	
+        "fy": fy,
+        "px": width / 2,
+        "py": height / 2,
+        "yaw": 90.0,
+        "pitch": 0.0,
+        "roll": 0.0,
+        "XCam": 0.0,
+        "YCam": -0.8,
+        "ZCam": 1.5
+    }
+
+    cam = Camera(config)
+
+    pxPerM = (res, res)
+    outputRes = (int(height) * res, int(width)  * res)
+
+    # setup mapping from street/top-image plane to world coords
+    shift = (outputRes[0] / 1.0, outputRes[1] / 2.0) # was (outputRes[0] / 2.0, outputRes[1] / 2.0)
+    M = np.array([[1.0 / pxPerM[1], 0.0, -shift[1] / pxPerM[1]], [0.0, -1.0 / pxPerM[0], shift[0] / pxPerM[0]], [0.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
+
+    ipm = np.linalg.inv(cam.P.dot(M))
+
+    # img = np.array(image)
+    # debug = cv2.warpPerspective(img, ipm, (width, height))
+
+    # # TODO: remove debug code
+    # cv2.imwrite("debug_orig.jpg", img)
+    # cv2.imwrite("debug.jpg", debug)
+
+
+    return ipm

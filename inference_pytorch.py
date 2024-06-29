@@ -126,14 +126,15 @@ class PyTorchPipeline:
         )
         return results, keypoints
 
-    def infer_offset_center(self, image, orig_sizes, control_object, image_on_cuda=False):
+    def infer_offset_center(self, image, orig_sizes, control_object, image_on_cuda=False, ipm=None):
         if image_on_cuda:
             # image arrives in (H, W, C), needs to have [C, H, W] format
             image = torch.as_tensor(image, device='cuda').permute(2, 0, 1)
             # image = torch.from_numpy(image).permute(2, 0, 1)
 
 
-        image = F.resize(image, size=input_sizes) #, interpolation=Image.NEAREST)
+        if orig_sizes != input_sizes:
+            image = F.resize(image, size=input_sizes) #, interpolation=Image.NEAREST)
 
 
         if image_on_cuda:
@@ -168,7 +169,7 @@ class PyTorchPipeline:
         )
 
         off_center, lane_heading_theta, _ = get_offset_center(
-            keypoints[0], (orig_sizes[1], orig_sizes[0])
+            keypoints[0], (orig_sizes[1], orig_sizes[0]), ipm
         )
 
         debug_info = {

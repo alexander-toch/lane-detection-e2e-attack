@@ -17,7 +17,7 @@ from metadrive_policy.lanedetection_policy_dpatch import LaneDetectionPolicy
 
 sys.path.append(os.path.dirname(os.getcwd()))
 from inference_pytorch import PyTorchPipeline
-from lanefitting import draw_lane
+from lanefitting import draw_lane, get_ipm_via_camera_config
 
 TARGET=np.load("attack/targets/turn_right.npy", allow_pickle=True).item()
 
@@ -28,6 +28,7 @@ class LaneDetectionPolicyE2E(LaneDetectionPolicy):
         self.stop_event = threading.Event()
         self.io_thread = threading.Thread(target=self.io_worker, daemon=True)
         self.io_thread.start()
+        self.ipm = None
 
     def io_worker(self):
         while not self.stop_event.isSet():
@@ -52,6 +53,10 @@ class LaneDetectionPolicyE2E(LaneDetectionPolicy):
         # get RGB camera image from vehicle
         observation = self.camera_observation.observe(self.control_object)
 
+        # top down camera (# 10 in driving direction, 50 height, yaw -90 degree)
+        # observation = self.camera_observation.observe(self.control_object, position=(0., 10., 50.), hpr=(0., -90.0, 0.0)) 
+
+
         image_on_cuda = get_global_config()["image_on_cuda"]
         attack_step_index = get_global_config()["dirty_road_patch_attack_step_index"]
 
@@ -62,9 +67,24 @@ class LaneDetectionPolicyE2E(LaneDetectionPolicy):
             image = observation["image"][..., -1]
             image_size = (image.shape[1], image.shape[0])
 
+        sensor = self.control_object.engine.get_sensor("rgb_camera")
+        lens = sensor.get_lens()
+        fov_angle = lens.getFov()
+
+        fx =  get_global_config()["window_size"][0]  / (2 * np.tan(fov_angle[0] * np.pi / 360))
+        fy = get_global_config()["window_size"][1] / (2 * np.tan(fov_angle[1] * np.pi / 360))
+
+        if True or self.ipm is None:
+            ipm_input_image = None
+            if image_on_cuda:
+                ipm_input_image = image.get() * 255
+            else:
+                ipm_input_image = image.permute((2, 0, 1)).contiguous().float().div(255).unsqueeze(0).numpy()
+            self.ipm = get_ipm_via_camera_config(ipm_input_image, fx, fy)
+
 
         offset_center, lane_heading_theta, keypoints, debug_info = (
-                self.pipeline.infer_offset_center(image, (image_size[1], image_size[0]), self.control_object, image_on_cuda) # important: swap image_size order
+                self.pipeline.infer_offset_center(image, (image_size[1], image_size[0]), self.control_object, image_on_cuda, self.ipm) # important: swap image_size order
             )
 
         if self.control_object.engine.episode_step == attack_step_index:
@@ -101,7 +121,7 @@ class LaneDetectionPolicyE2E(LaneDetectionPolicy):
         # TODO: add a flag to enable image saving and interval
         if self.control_object.engine.episode_step % 10 == 0:
             print(f"Step: {self.control_object.engine.episode_step}, offset_center: {offset_center}, lane_heading_theta: {lane_heading_theta}, v_heading: {v_heading}, steering: {steering}")
-            lane_image = draw_lane(image.get() * 255 if image_on_cuda else image, keypoints, image_size) # swap image_size
+            lane_image = draw_lane(image.get() * 255 if image_on_cuda else image, keypoints, image_size, self.ipm) # swap image_size 
             if lane_image is not None:
                 self.io_tasks.put(lambda: cv2.imwrite(
                         f"camera_observations/lane_{str(self.control_object.engine.episode_step)}.jpg",
@@ -113,25 +133,26 @@ class LaneDetectionPolicyE2E(LaneDetectionPolicy):
 
 
 
-        #     if 'probmaps' in debug_info:
-        #         prob_maps = torch.nn.functional.interpolate(debug_info['probmaps']['out'], 
-        #                                                     size=(image_size[1], image_size[0]), mode='bilinear', align_corners=True)
-        #         prob_maps_softmax = prob_maps.detach().clone().softmax(dim=1)
+            if 'probmaps' in debug_info and get_global_config()["save_probmaps"]:
+                import torch
+                prob_maps = torch.nn.functional.interpolate(debug_info['probmaps']['out'], 
+                                                            size=(image_size[1], image_size[0]), mode='bilinear', align_corners=True)
+                prob_maps_softmax = prob_maps.detach().clone().softmax(dim=1)
                 
-        #         merged = np.zeros_like(prob_maps[0][1].detach().cpu().numpy())
-        #         merged_softmax = np.zeros_like(prob_maps_softmax[0][1].detach().cpu().numpy())
+                merged = np.zeros_like(prob_maps[0][1].detach().cpu().numpy())
+                merged_softmax = np.zeros_like(prob_maps_softmax[0][1].detach().cpu().numpy())
 
-        #         for i, lane in enumerate(prob_maps[0]):
-        #             if i == 0: # skip first iteration (background class)
-        #                 continue
-        #             pred = lane.detach().cpu().numpy()
-        #             pred_softmax = prob_maps_softmax[0][i].detach().cpu().numpy()
-        #             merged = np.maximum(merged, pred)
-        #             merged_softmax = np.maximum(merged_softmax, pred_softmax)
+                for i, lane in enumerate(prob_maps[0]):
+                    if i == 0: # skip first iteration (background class)
+                        continue
+                    pred = lane.detach().cpu().numpy()
+                    pred_softmax = prob_maps_softmax[0][i].detach().cpu().numpy()
+                    merged = np.maximum(merged, pred)
+                    merged_softmax = np.maximum(merged_softmax, pred_softmax)
 
-        #         im = Image.fromarray(merged)
-        #         im_softmax = Image.fromarray(merged_softmax)
-        #         plt.imsave(f"camera_observations/probmap_{str(self.control_object.engine.episode_step)}_merged.jpg", im, cmap='seismic')
-        #         plt.imsave(f"camera_observations/softmax_probmap_{str(self.control_object.engine.episode_step)}_merged.jpg", im_softmax, cmap='seismic')
+                im = Image.fromarray(merged)
+                im_softmax = Image.fromarray(merged_softmax)
+                plt.imsave(f"camera_observations/probmap_{str(self.control_object.engine.episode_step)}_merged.jpg", im, cmap='seismic')
+                plt.imsave(f"camera_observations/softmax_probmap_{str(self.control_object.engine.episode_step)}_merged.jpg", im_softmax, cmap='seismic')
 
         return action
