@@ -38,6 +38,7 @@ elif MODEL == "scnn":
 
 @dataclass
 class DirtyRoadPatch:
+    model_in: np.ndarray
     patch: np.ndarray
     location: tuple
     probmaps: torch.Tensor
@@ -57,8 +58,16 @@ class PyTorchPipeline:
             self.device = torch.device(f"cuda:{cuda_idx}")
 
 
-        self.patch_size = (120,300) # (height, width)
-        self.patch_location=(200,160) # in format (W, H). (800, 288) is input size for resa
+        # config for 1280x720
+        # self.patch_size = (120,300) # (height, width)
+        # self.patch_location=(200,160) # in format (W, H). (800, 288) is input size for resa
+
+        # config for 800x288
+        w, h = 800, 288
+        PATCH_SCALE_FACTOR = 0.0875
+        self.patch_size = (int(w * PATCH_SCALE_FACTOR),int(w * PATCH_SCALE_FACTOR)) # only support quadratic patches for now
+        self.patch_location=(int(w/2 - self.patch_size[1] / 2), int(h/2 + self.patch_size[0])) # in format (W, H). (800, 288) is input size for resa
+
         brightness_range= (0.8, 1.0)
         rotation_weights = (0.4, 0.2, 0.2, 0.2)
         optimizer = BaseTrainer.get_optimizer(self.cfg['optimizer'], self.model)
@@ -89,7 +98,7 @@ class PyTorchPipeline:
 
         self.targeted = targeted
         self.attack = MyRobustDPatch(estimator=classifier, 
-                        max_iter=90,
+                        max_iter=200,
                         sample_size=1,
                         patch_shape=(3, self.patch_size[0], self.patch_size[1]), 
                         patch_location=self.patch_location,
@@ -256,10 +265,11 @@ class PyTorchPipeline:
         patch = cv2.resize(patch, (int(patch.shape[1] * scale_factor_width), int(patch.shape[0] * scale_factor_height)))
 
         if generate_patch:
-            cv2.imwrite(f'camera_observations/{control_object.engine.episode_step}_patch.jpg', patch)
+            cv2.imwrite(f'camera_observations/patch_{control_object.engine.episode_step}.jpg', patch)
 
         scaled_location = (int(self.patch_location[0] * scale_factor_width), int(self.patch_location[1] * scale_factor_height)) # format (x, y)
         patch_object: DirtyRoadPatch = DirtyRoadPatch(
+            model_in[0].cpu().numpy(),
             patch, 
             scaled_location, 
             results,

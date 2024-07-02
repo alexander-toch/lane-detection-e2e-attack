@@ -2,16 +2,13 @@ import pickle
 import queue
 import threading
 import cv2
-from metadrive.policy.base_policy import BasePolicy
 from metadrive.engine.engine_utils import get_global_config
-from metadrive.obs.image_obs import ImageStateObservation
-from metadrive.component.vehicle.PID_controller import PIDController
-from metadrive.policy.manual_control_policy import KeyboardController, get_controller
-from metadrive.utils.math import not_zero, wrap_to_pi
+from metadrive.utils.math import wrap_to_pi
 from PIL import Image
 import numpy as np
 import matplotlib.pyplot as plt
 import sys, os
+import torch
 
 from metadrive_policy.lanedetection_policy_dpatch import LaneDetectionPolicy
 
@@ -42,6 +39,27 @@ class LaneDetectionPolicyE2E(LaneDetectionPolicy):
     def __exit__(self, exc_type, exc_value, traceback):
         self.stop_event.set()
         self.io_thread.join()
+
+    def get_probmap_images(self, probmaps, image_size):
+        prob_maps = torch.nn.functional.interpolate(probmaps['out'], 
+                                                    size=(image_size[1], image_size[0]), mode='bilinear', align_corners=True)
+        prob_maps_softmax = prob_maps.detach().clone().softmax(dim=1)
+        
+        merged = np.zeros_like(prob_maps[0][1].detach().cpu().numpy())
+        merged_softmax = np.zeros_like(prob_maps_softmax[0][1].detach().cpu().numpy())
+
+        for i, lane in enumerate(prob_maps[0]):
+            if i == 0: # skip first iteration (background class)
+                continue
+            pred = lane.detach().cpu().numpy()
+            pred_softmax = prob_maps_softmax[0][i].detach().cpu().numpy()
+            merged = np.maximum(merged, pred)
+            merged_softmax = np.maximum(merged_softmax, pred_softmax)
+
+        im = Image.fromarray(merged)
+        im_softmax = Image.fromarray(merged_softmax)
+
+        return im, im_softmax
 
     def expert(self):
 
@@ -94,7 +112,15 @@ class LaneDetectionPolicyE2E(LaneDetectionPolicy):
 
             self.control_object.engine.dirty_road_patch_object = patch_object
 
-            # pickle.dump(patch, open(f"camera_observations/seed_{self.control_object.engine.seed}_patch.pkl", "wb"))
+            self.io_tasks.put(lambda: self.pipeline.save_image(
+                    patch_object.model_in,
+                    f"camera_observations/patched_input_{str(self.control_object.engine.episode_step)}.jpg",
+                )
+            )
+
+            im, im_softmax = self.get_probmap_images(patch_object.probmaps, image_size)
+            plt.imsave(f"camera_observations/patched_probmap_{str(self.control_object.engine.episode_step)}_merged.jpg", im, cmap='seismic')
+            plt.imsave(f"camera_observations/patched_softmax_probmap_{str(self.control_object.engine.episode_step)}_merged.jpg", im_softmax, cmap='seismic')
 
 
         v_heading = self.control_object.heading_theta  # current vehicle heading
@@ -131,8 +157,8 @@ class LaneDetectionPolicyE2E(LaneDetectionPolicy):
                         lane_image
                     )
                 )
-                cv2.imshow("lane", lane_image_bev)
-                cv2.waitKey(10)
+                # cv2.imshow("lane", lane_image_bev)
+                # cv2.waitKey(10)
                 self.io_tasks.put(lambda: cv2.imwrite(
                         f"camera_observations/lane_bev_{str(self.control_object.engine.episode_step)}.jpg",
                         lane_image_bev
@@ -141,27 +167,8 @@ class LaneDetectionPolicyE2E(LaneDetectionPolicy):
             else:
                 print(f"step {str(self.control_object.engine.episode_step)} lane_image is None")
 
-
-
             if 'probmaps' in debug_info and get_global_config()["save_probmaps"]:
-                import torch
-                prob_maps = torch.nn.functional.interpolate(debug_info['probmaps']['out'], 
-                                                            size=(image_size[1], image_size[0]), mode='bilinear', align_corners=True)
-                prob_maps_softmax = prob_maps.detach().clone().softmax(dim=1)
-                
-                merged = np.zeros_like(prob_maps[0][1].detach().cpu().numpy())
-                merged_softmax = np.zeros_like(prob_maps_softmax[0][1].detach().cpu().numpy())
-
-                for i, lane in enumerate(prob_maps[0]):
-                    if i == 0: # skip first iteration (background class)
-                        continue
-                    pred = lane.detach().cpu().numpy()
-                    pred_softmax = prob_maps_softmax[0][i].detach().cpu().numpy()
-                    merged = np.maximum(merged, pred)
-                    merged_softmax = np.maximum(merged_softmax, pred_softmax)
-
-                im = Image.fromarray(merged)
-                im_softmax = Image.fromarray(merged_softmax)
+                im, im_softmax = self.get_probmap_images(debug_info['probmaps'], image_size)
                 plt.imsave(f"camera_observations/probmap_{str(self.control_object.engine.episode_step)}_merged.jpg", im, cmap='seismic')
                 plt.imsave(f"camera_observations/softmax_probmap_{str(self.control_object.engine.episode_step)}_merged.jpg", im_softmax, cmap='seismic')
 

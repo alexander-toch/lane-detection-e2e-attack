@@ -77,7 +77,14 @@ class MetaDriveBridge:
             interface_panel=["dashboard", "rgb_camera", "topdown_camera"],
         )
 
+    def cleanup(self):
+        # delete all the previous camera observations
+        for f in glob.glob("./camera_observations/*.jpg"):
+            os.remove(f)
+
     def run(self):
+        self.cleanup()
+
         if self.settings.attack_config is not None:
             self.config["dirty_road_patch_attack_step_index"]= self.settings.attack_config.attack_at_step
             if self.settings.attack_config.two_pass_attack:
@@ -91,6 +98,8 @@ class MetaDriveBridge:
             self.run_simulation(env)
 
     def run_two_pass_attack(self):
+        self.cleanup()
+
         # ATTACK PASS 1: Drive without attack and generate the patch
         self.config["enable_dirty_road_patch_attack"] = False
         env = MetaDriveEnv(self.config)
@@ -102,9 +111,6 @@ class MetaDriveBridge:
         self.run_simulation(env)
 
     def run_simulation(self, env: MetaDriveEnv):
-        # delete all the previous camera observations
-        for f in glob.glob("./camera_observations/*.jpg"):
-            os.remove(f)
 
         env.reset(self.settings.seed)
         env.current_track_agent.expert_takeover = not self.settings.start_with_manual_control
