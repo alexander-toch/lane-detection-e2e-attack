@@ -11,50 +11,9 @@ from metadrive.component.sensors.base_camera import _cuda_enable
 from metadrive.component.map.pg_map import MapGenerateMethod
 from panda3d.core import Mat4, CSYupRight, CSZupRight, TransformState, UnalignedLMatrix4f
 
+from metadrive_policy.TopDownCamera import TopDownCamera
 from metadrive_policy.lanedetection_policy_patch_e2e import LaneDetectionPolicyE2E
 from metadrive_policy.lanedetection_policy_dpatch import LaneDetectionPolicy
-
-import numpy as np
-
-class Camera:
-
-  K = np.zeros([3, 3])
-  R = np.zeros([3, 3])
-  t = np.zeros([3, 1])
-  P = np.zeros([3, 4])
-
-  def setK(self, fx, fy, px, py):
-    self.K[0, 0] = fx
-    self.K[1, 1] = fy
-    self.K[0, 2] = px
-    self.K[1, 2] = py
-    self.K[2, 2] = 1.0
-
-  def setR(self, y, p, r):
-
-    Rz = np.array([[np.cos(-y), -np.sin(-y), 0.0], [np.sin(-y), np.cos(-y), 0.0], [0.0, 0.0, 1.0]])
-    Ry = np.array([[np.cos(-p), 0.0, np.sin(-p)], [0.0, 1.0, 0.0], [-np.sin(-p), 0.0, np.cos(-p)]])
-    Rx = np.array([[1.0, 0.0, 0.0], [0.0, np.cos(-r), -np.sin(-r)], [0.0, np.sin(-r), np.cos(-r)]])
-    Rs = np.array([[0.0, -1.0, 0.0], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0]]) # switch axes (x = -y, y = -z, z = x)
-    self.R = Rs.dot(Rz.dot(Ry.dot(Rx)))
-
-  def setT(self, XCam, YCam, ZCam):
-    X = np.array([XCam, YCam, ZCam])
-    self.t = -self.R.dot(X)
-
-  def updateP(self):
-    Rt = np.zeros([3, 4])
-    Rt[0:3, 0:3] = self.R
-    Rt[0:3, 3] = self.t
-    self.P = self.K.dot(Rt)
-
-  def __init__(self, config):
-    self.config = config
-    self.setK(config["fx"], config["fy"], config["px"], config["py"])
-    self.setR(np.deg2rad(config["yaw"]), np.deg2rad(config["pitch"]), np.deg2rad(config["roll"]))
-    self.setT(config["XCam"], config["YCam"], config["ZCam"])
-    self.updateP()
-
 
 @dataclass
 class AttackConfig:
@@ -92,6 +51,7 @@ class MetaDriveBridge:
             window_size=self.settings.simulator_window_size,
             sensors={
                 "rgb_camera": (RGBCamera, self.settings.simulator_window_size[0], self.settings.simulator_window_size[1]),
+                # "topdown_camera": (TopDownCamera, self.settings.simulator_window_size[0], self.settings.simulator_window_size[1]),
             },
             vehicle_config={
                 "image_source": "rgb_camera",
@@ -114,7 +74,7 @@ class MetaDriveBridge:
             force_map_generation=True, # disables the PG Map cache
             show_fps=True,
             show_interface_navi_mark=False,
-            interface_panel=["dashboard", "rgb_camera"],
+            interface_panel=["dashboard", "rgb_camera", "topdown_camera"],
         )
 
     def run(self):
@@ -185,6 +145,7 @@ class MetaDriveBridge:
                 print(f"Simulation ended at step {step_index}")
                 if env.current_seed + 1 < self.settings.seed + self.settings.num_scenarios:
                     env.reset(env.current_seed + 1)
+                    env.current_track_agent.expert_takeover = not self.settings.start_with_manual_control
                 else:
                     break            
             step_index += 1

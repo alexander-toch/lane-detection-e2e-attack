@@ -110,13 +110,15 @@ class LaneDetectionPolicy(BasePolicy):
         # )
 
         self.target_speed = self.NORMAL_SPEED
+        steering_threshold = 2.0
+
         if offset_center is None:
             steering = self.lateral_pid.get_result(0)
             # brake if no lane detected
             self.target_speed = 0.01
-        elif offset_center > 0.01:
+        elif offset_center > steering_threshold:
             steering = self.lateral_pid.get_result(-wrap_to_pi(-self.STEERING_VALUE_RAD)) # radian in range (-pi, pi]
-        elif offset_center < -0.01:
+        elif offset_center < -steering_threshold:
             steering = self.lateral_pid.get_result(-wrap_to_pi(+self.STEERING_VALUE_RAD)) # radian in range (-pi, pi]
         else:
             steering = self.lateral_pid.get_result(0)
@@ -126,10 +128,11 @@ class LaneDetectionPolicy(BasePolicy):
 
         # TODO: add a flag to enable image saving and interval
         if self.control_object.engine.episode_step % 10 == 0:
-            print(f"Step: {self.control_object.engine.episode_step}, offset_center: {offset_center}, lane_heading_theta: {lane_heading_theta}, v_heading: {v_heading}, steering: {steering}")
+            if self.control_object.engine.episode_step % 50 == 0:
+                print(f"Step: {self.control_object.engine.episode_step}, offset_center: {offset_center}, lane_heading_theta: {lane_heading_theta}, v_heading: {v_heading}, steering: {steering}")
             lane_image = draw_lane(image.get() * 255 if image_on_cuda else image, keypoints, image_size) # swap image_size
 
-            # lane iamge format is (H, W, C), (720, 1280, 3)
+            # lane image format is (H, W, C), (720, 1280, 3)
             # debug_info['patch'].shape is (H, W, C)
             if 'patch' in debug_info and 'location' in debug_info:
                 patch = debug_info['patch']#.transpose(1, 0, 2) # convert to H,W,C

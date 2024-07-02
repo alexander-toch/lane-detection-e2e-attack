@@ -140,7 +140,7 @@ class PyTorchPipeline:
         if image_on_cuda:
             model_in = image.unsqueeze(0)
             results = self.model(model_in)
-            self.save_image(model_in[0].cpu().numpy(), f'camera_observations/{control_object.engine.episode_step}_model_input.jpg')
+            # self.save_image(model_in[0].cpu().numpy(), f'camera_observations/{control_object.engine.episode_step}_model_input.jpg')
         else:
             model_in = torch.ByteTensor(torch.ByteStorage.from_buffer(image.tobytes()))
             model_in = model_in.view(image.size[1], image.size[0], len(image.getbands()))
@@ -153,7 +153,7 @@ class PyTorchPipeline:
                 .numpy()
             )
 
-            self.save_image(model_in[0], f'camera_observations/{control_object.engine.episode_step}_model_input.jpg')
+            # self.save_image(model_in[0], f'camera_observations/{control_object.engine.episode_step}_model_input.jpg')
             results = self.model(torch.from_numpy(model_in).to(self.device))
 
         keypoints = lane_as_segmentation_inference(
@@ -186,7 +186,7 @@ class PyTorchPipeline:
         # image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
         cv2.imwrite(path, image)
     
-    def infer_offset_center_with_dpatch(self, image, orig_sizes, control_object, generate_patch=True, target=None, image_on_cuda=False):
+    def infer_offset_center_with_dpatch(self, image, orig_sizes, control_object, generate_patch=True, target=None, image_on_cuda=False, ipm=None):
         if self.targeted and target is None:
             raise ValueError("Targeted attack requires a target!")
         
@@ -244,7 +244,7 @@ class PyTorchPipeline:
         )
 
         off_center, lane_heading_theta, _ = get_offset_center(
-            keypoints[0], (orig_sizes[1], orig_sizes[0])
+            keypoints[0], (orig_sizes[1], orig_sizes[0]), ipm
         )
 
         # scale patch to match orig_sizes proportionally

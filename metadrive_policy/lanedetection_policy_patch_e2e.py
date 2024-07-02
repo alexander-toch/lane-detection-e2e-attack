@@ -17,7 +17,7 @@ from metadrive_policy.lanedetection_policy_dpatch import LaneDetectionPolicy
 
 sys.path.append(os.path.dirname(os.getcwd()))
 from inference_pytorch import PyTorchPipeline
-from lanefitting import draw_lane, get_ipm_via_camera_config
+from lanefitting import draw_lane, draw_lane_bev, get_ipm_via_camera_config
 
 TARGET=np.load("attack/targets/turn_right.npy", allow_pickle=True).item()
 
@@ -108,9 +108,11 @@ class LaneDetectionPolicyE2E(LaneDetectionPolicy):
             steering = self.lateral_pid.get_result(0)
             # brake if no lane detected
             self.target_speed = 0.01
-        elif offset_center > 0.01:
+        elif offset_center > 2:
+            # steer to the left
             steering = self.lateral_pid.get_result(-wrap_to_pi(-STEERING_VALUE_RAD)) # radian in range (-pi, pi]
-        elif offset_center < -0.01:
+        elif offset_center < -2:
+            # steer to the right
             steering = self.lateral_pid.get_result(-wrap_to_pi(+STEERING_VALUE_RAD)) # radian in range (-pi, pi]
         else:
             steering = self.lateral_pid.get_result(0)
@@ -122,10 +124,18 @@ class LaneDetectionPolicyE2E(LaneDetectionPolicy):
         if self.control_object.engine.episode_step % 10 == 0:
             print(f"Step: {self.control_object.engine.episode_step}, offset_center: {offset_center}, lane_heading_theta: {lane_heading_theta}, v_heading: {v_heading}, steering: {steering}")
             lane_image = draw_lane(image.get() * 255 if image_on_cuda else image, keypoints, image_size, self.ipm) # swap image_size 
+            lane_image_bev = draw_lane_bev(image.get() * 255 if image_on_cuda else image, keypoints, image_size, self.ipm) 
             if lane_image is not None:
                 self.io_tasks.put(lambda: cv2.imwrite(
                         f"camera_observations/lane_{str(self.control_object.engine.episode_step)}.jpg",
                         lane_image
+                    )
+                )
+                cv2.imshow("lane", lane_image_bev)
+                cv2.waitKey(10)
+                self.io_tasks.put(lambda: cv2.imwrite(
+                        f"camera_observations/lane_bev_{str(self.control_object.engine.episode_step)}.jpg",
+                        lane_image_bev
                     )
                 )
             else:

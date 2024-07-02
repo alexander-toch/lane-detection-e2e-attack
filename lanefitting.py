@@ -28,11 +28,14 @@ def get_offset_center(keypoints, image_size: tuple, transform_matrix=None) -> fl
     left_lane_start = left_lane_poly(height)
     right_lane_start = right_lane_poly(height)
     current_center_x = left_lane_start + (right_lane_start - left_lane_start) / 2
-    desired_center_x = width / 2.0
+    desired_center_x = width / 2.0 # center of the image (if camera is in the center of the car)
 
-    xm_per_pix = 0.00106  # meters per pixel in x dimension # TODO: is this needed?
+    # print(f"left_lane_start: {left_lane_start}, right_lane_start: {right_lane_start}, current_center_x: {current_center_x}, desired_center_x: {desired_center_x}")
+    # print(left_lane_poly(last_10))
+    # print(right_lane_poly(last_10))
+
     off_center = round(
-        (current_center_x - desired_center_x) * xm_per_pix, 4
+        current_center_x - desired_center_x, 4
     )  # assume camera is in the center of the car
 
     # draw a virtual line from the center of the car to direction of the lane
@@ -64,32 +67,32 @@ def get_ego_lanes(lanes, transformation_matrix, image_size: tuple):
 
     for i, lane in enumerate(lanes_transformed):
         avg = np.average(lane.T[0])
-        # print(f"Lane {i}: Average: {avg}, Middle: {middle}, Left: {np.average(left_lane[0])}, Right: {np.average(right_lane[0])}")
+        # print(f"Lane {i}: Average: {avg}, Middle: {middle}, Left: {np.average(left_lane.T[0])}, Right: {np.average(right_lane.T[0])}")
 
-        if avg < middle and avg > np.average(left_lane.T[0]):
+        if avg < middle and avg > np.average(left_lane.T[0]) and avg < np.average(right_lane.T[0]):
             left_lane = np.float32(lane)
             selected_indices[0] = i
             continue
 
-        if avg > middle and avg < np.average(right_lane.T[0]):
+        if avg > middle and avg < np.average(right_lane.T[0]) and avg > np.average(left_lane.T[0]) and i != selected_indices[0]:
             right_lane = np.float32(lane)
             selected_indices[1] = i
             continue
 
     # TODO: find a better fix for the case when the lane detection is not accurate
     # print(f"Std right: {np.std(right_lane[:, 0])}, Std left: {np.std(left_lane[:, 0])}")
-    if np.std(right_lane[:, 0]) > 50:
-        # find the point with the biggest x-axis difference to the previous point
-        max_diff = 0
-        max_diff_index = 0
-        for i in range(1, len(right_lane)):
-            diff = right_lane[i][0] - right_lane[i-1][0]
-            if diff > max_diff:
-                max_diff = diff
-                max_diff_index = i
-        new_r = right_lane[right_lane[:, 0] < right_lane[max_diff_index-1][0]-1]
-        if len(new_r) > len(right_lane)/2:
-            right_lane = new_r
+    # if np.std(right_lane[:, 0]) > 50:
+    #     # find the point with the biggest x-axis difference to the previous point
+    #     max_diff = 0
+    #     max_diff_index = 0
+    #     for i in range(1, len(right_lane)):
+    #         diff = right_lane[i][0] - right_lane[i-1][0]
+    #         if diff > max_diff:
+    #             max_diff = diff
+    #             max_diff_index = i
+    #     new_r = right_lane[right_lane[:, 0] < right_lane[max_diff_index-1][0]-1]
+    #     if len(new_r) > len(right_lane)/2:
+    #         right_lane = new_r
 
     return left_lane, right_lane, selected_indices
 
@@ -209,9 +212,11 @@ def draw_lane(image, keypoints, image_size: tuple, transform_matrix=None):
         for point in lane:
             cv2.circle(image_np, (int(point[0]), int(point[1])), w, colors[i], -1)
 
-    offset_center, theta, debug_info = get_offset_center(keypoints, image_size)
-    cv2.putText(image_np, f'Offset center: {offset_center}m (+ means deviation to right,- means to the left)', (10, 20), cv2.FONT_HERSHEY_SIMPLEX , 0.5, (255, 255, 255), 1, cv2.LINE_AA)
-    cv2.putText(image_np, f'Theta: {theta} ({np.rad2deg(theta)})', (10, 40), cv2.FONT_HERSHEY_SIMPLEX , 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+    offset_center, theta, debug_info = get_offset_center(keypoints, image_size, transform_matrix=transform_matrix)
+    cv2.putText(image_np, f'Offset center: {offset_center}px (+ means deviation to right,- means to the left)', (10, 20), cv2.FONT_HERSHEY_SIMPLEX , 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+    # cv2.putText(image_np, f'Theta: {theta} ({np.rad2deg(theta)})', (10, 40), cv2.FONT_HERSHEY_SIMPLEX , 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+    direction = "right" if offset_center < 0 else "left" if offset_center > 0 else "straight"
+    cv2.putText(image_np, f'Steering direction: {direction}. Green circle is desired center. White is current lane center.', (10, 40), cv2.FONT_HERSHEY_SIMPLEX , 0.5, (255, 255, 255), 1, cv2.LINE_AA)
 
     # desired center
     cv2.circle(image_np, (int(width/2), int(height-3)), 3, (0, 255, 0), -1, cv2.LINE_AA)
@@ -231,6 +236,68 @@ def draw_lane(image, keypoints, image_size: tuple, transform_matrix=None):
 
     return result
 
+def draw_lane_bev(image, keypoints, image_size: tuple, transform_matrix=None):
+    if len(keypoints) < 2:
+        print("No lanes detected")
+        image_np = np.array(image)
+        cv2.putText(image_np, f'NO LANES DETECTED', (10, 60), cv2.FONT_HERSHEY_SIMPLEX , 2, (0, 0, 255), 2, cv2.LINE_AA)
+        return image_np
+
+    if transform_matrix is None: 
+        transform_matrix, _ = get_transform_matrix(image_size)
+
+    left_lane_bev, right_lane_bev, selected_indices = get_ego_lanes(keypoints, transform_matrix, image_size)
+
+    if (selected_indices[0] == selected_indices[1]):
+        print("Warning: ego lane indexes are the same, this should not happen!")
+
+    left_lane_poly = fit_lane(left_lane_bev)
+    right_lane_poly = fit_lane(right_lane_bev)
+
+    width = image_size[0]
+    height = image_size[1]
+    color_fill_image = np.zeros([height, width, 3])
+
+    y_range = np.linspace(0, height - 1, height)
+    left_fit = left_lane_poly(y_range)
+    right_fit = right_lane_poly(y_range)
+
+    l1 = np.transpose(np.vstack([left_fit, y_range]))
+    l2 = np.flip(np.transpose(np.vstack([right_fit, y_range])), axis=0) 
+    pts = np.int_(np.vstack((l1, l2)))
+
+    image_np = np.array(image)
+    image_np = cv2.warpPerspective(image_np, transform_matrix, (width, height))
+
+    colors = [(255,0,0), (0,255,0), (0,0,255), (0,255,255), (255,255,0), (255,0,255)]
+
+    for i, lane in enumerate(keypoints):
+        lane_bev = perspective_warp(np.array(lane), transform_matrix)
+        w = 2 if i in selected_indices else 1        
+        for point in lane_bev:
+            cv2.circle(image_np, (int(point[0]), int(point[1])), w, colors[i], -1)
+
+    offset_center, theta, debug_info = get_offset_center(keypoints, image_size, transform_matrix=transform_matrix)
+    cv2.putText(image_np, f'Offset center: {offset_center}px (+ means deviation to right,- means to the left)', (10, 20), cv2.FONT_HERSHEY_SIMPLEX , 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+    # cv2.putText(image_np, f'Theta: {theta} ({np.rad2deg(theta)})', (10, 40), cv2.FONT_HERSHEY_SIMPLEX , 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+    direction = "left" if offset_center < 0 else "right" if offset_center > 0 else "straight"
+    cv2.putText(image_np, f'Steering direction: {direction}. Green circle is desired center. White is current lane center.', (10, 40), cv2.FONT_HERSHEY_SIMPLEX , 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+
+    # desired center
+    cv2.circle(image_np, (int(width/2), int(height-3)), 3, (0, 255, 0), -1, cv2.LINE_AA)
+
+    # current lane center
+    # debug_info = {radius, angle_rad, start_point, end_point}
+    left_lane_start = left_lane_poly(height)
+    right_lane_start = right_lane_poly(height)
+    current_center_x = left_lane_start + (right_lane_start - left_lane_start) / 2
+    cv2.circle(image_np, (int(current_center_x), int(height-3)), 3, (255, 255, 255), -1, cv2.LINE_AA)
+    # end_point_transformed = perspective_warp(np.array([debug_info[3]]), transform_matrix_inv)[0]
+    # cv2.arrowedLine(image_np, (int(width/2), int(height-3)), np.int_(end_point_transformed), (0, 0, 0), 1, cv2.LINE_AA)  
+
+    color_fill_image = cv2.fillPoly(color_fill_image, [pts], (0, 255, 0))  
+    result = cv2.addWeighted(image_np, 1, color_fill_image, 0.2, 0, dtype=cv2.CV_8U)
+    return result
 
 class Camera:
   K = np.zeros([3, 3])
@@ -264,10 +331,10 @@ class Camera:
     self.P = self.K.dot(Rt)
 
   def __init__(self, config):
+    self.config = config
     self.setK(config["fx"], config["fy"], config["px"], config["py"])
     self.setR(np.deg2rad(config["yaw"]), np.deg2rad(config["pitch"]), np.deg2rad(config["roll"]))
-    DEBUG_SCALE_FACTOR = 8.0
-    self.setT(config["XCam"], config["YCam"] * DEBUG_SCALE_FACTOR, config["ZCam"] * DEBUG_SCALE_FACTOR)
+    self.setT(config["XCam"], config["YCam"], config["ZCam"])
     self.updateP()
 
 def get_ipm_via_camera_config(image, fx, fy, res=1):
@@ -284,31 +351,28 @@ def get_ipm_via_camera_config(image, fx, fy, res=1):
         "fy": fy,
         "px": width / 2,
         "py": height / 2,
-        "yaw": 90.0,
-        "pitch": 0.0,
-        "roll": 0.0,
-        "XCam": 0.0,
-        "YCam": -0.8,
-        "ZCam": 1.5
+        'yaw': 90.0, 
+        'pitch': 0.0, 
+        'roll': 0.0, 
+        'XCam': 0.0, 
+        'YCam': 0.0, 
+        'ZCam': 1.5
     }
 
     cam = Camera(config)
 
-    pxPerM = (res, res)
-    outputRes = (int(height) * res, int(width)  * res)
+    cam_height = 50.0 # 50m high camera (drone)
+    x_offset = 35.0 # in driving direction
+
+    outputRes = (int(2 * cam.config["py"]), int(2 * cam.config["px"]))
+    dx = outputRes[1] / cam.config["fx"] * cam_height
+    dy = outputRes[0] / cam.config["fy"] * cam_height
+    pxPerM = (outputRes[0] / dx, outputRes[1] / dy)
+
 
     # setup mapping from street/top-image plane to world coords
-    shift = (outputRes[0] / 1.0, outputRes[1] / 2.0) # was (outputRes[0] / 2.0, outputRes[1] / 2.0)
+    shift = (outputRes[0] / 2.0, outputRes[1] / 2.0) # was (outputRes[0] / 2.0, outputRes[1] / 2.0)
+    shift = shift[0] + x_offset * pxPerM[0], shift[1] - cam.config["XCam"] * pxPerM[1]
     M = np.array([[1.0 / pxPerM[1], 0.0, -shift[1] / pxPerM[1]], [0.0, -1.0 / pxPerM[0], shift[0] / pxPerM[0]], [0.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
-
     ipm = np.linalg.inv(cam.P.dot(M))
-
-    # img = np.array(image)
-    # debug = cv2.warpPerspective(img, ipm, (width, height))
-
-    # # TODO: remove debug code
-    # cv2.imwrite("debug_orig.jpg", img)
-    # cv2.imwrite("debug.jpg", debug)
-
-
     return ipm
