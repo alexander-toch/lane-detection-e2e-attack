@@ -46,7 +46,7 @@ class DirtyRoadPatch:
     input_image_sizes: tuple = None
 
 class PyTorchPipeline:
-    def __init__(self, model_path=ONNX_MODEL_PATH, targeted=False):
+    def __init__(self, model_path=ONNX_MODEL_PATH, targeted=False, patch_size=(120,300), patch_location=(200,160), max_iterations=50):
         self.cfg = read_config(CONFIG)
         self.model = MODELS.from_dict(self.cfg['model'])
         self.current_patch = None
@@ -61,12 +61,8 @@ class PyTorchPipeline:
         # config for 1280x720
         # self.patch_size = (120,300) # (height, width)
         # self.patch_location=(200,160) # in format (W, H). (800, 288) is input size for resa
-
-        # config for 800x288
-        w, h = 800, 288
-        PATCH_SCALE_FACTOR = 0.0875
-        self.patch_size = (int(w * PATCH_SCALE_FACTOR),int(w * PATCH_SCALE_FACTOR)) # only support quadratic patches for now
-        self.patch_location=(int(w/2 - self.patch_size[1] / 2), int(h/2 + self.patch_size[0])) # in format (W, H). (800, 288) is input size for resa
+        self.patch_size = patch_size
+        self.patch_location=patch_location
 
         brightness_range= (0.8, 1.0)
         rotation_weights = (0.4, 0.2, 0.2, 0.2)
@@ -98,8 +94,8 @@ class PyTorchPipeline:
 
         self.targeted = targeted
         self.attack = MyRobustDPatch(estimator=classifier, 
-                        max_iter=200,
-                        sample_size=1,
+                        max_iter=max_iterations,
+                        sample_size=max(int(max_iterations/90), 1),
                         patch_shape=(3, self.patch_size[0], self.patch_size[1]), 
                         patch_location=self.patch_location,
                         brightness_range=brightness_range,
@@ -149,7 +145,7 @@ class PyTorchPipeline:
         if image_on_cuda:
             model_in = image.unsqueeze(0)
             results = self.model(model_in)
-            # self.save_image(model_in[0].cpu().numpy(), f'camera_observations/{control_object.engine.episode_step}_model_input.jpg')
+            self.save_image(model_in[0].cpu().numpy(), f'camera_observations/{control_object.engine.episode_step}_model_input.png')
         else:
             model_in = torch.ByteTensor(torch.ByteStorage.from_buffer(image.tobytes()))
             model_in = model_in.view(image.size[1], image.size[0], len(image.getbands()))
@@ -205,7 +201,8 @@ class PyTorchPipeline:
             # image = torch.from_numpy(image).permute(2, 0, 1)
 
 
-        image = F.resize(image, size=input_sizes) #, interpolation=Image.NEAREST)
+        if orig_sizes != input_sizes:
+            image = F.resize(image, size=input_sizes)
 
 
         if image_on_cuda:
@@ -227,7 +224,7 @@ class PyTorchPipeline:
                 self.current_patch = self.attack.generate(x=model_in.cpu().numpy() if image_on_cuda else model_in.copy(), y=target)[0]
             else:
                 self.current_patch = self.attack.generate(x=model_in.cpu().numpy() if image_on_cuda else model_in.copy())[0]
-            # self.save_image(self.current_patch, f'camera_observations/{control_object.engine.episode_step}_patch.jpg', sizes=(self.current_patch.shape[1], self.current_patch.shape[2]))
+            self.save_image(self.current_patch, f'camera_observations/patch_{control_object.engine.episode_step}.png', sizes=(self.current_patch.shape[1], self.current_patch.shape[2]))
         
         patch = self.current_patch
 
@@ -265,7 +262,7 @@ class PyTorchPipeline:
         patch = cv2.resize(patch, (int(patch.shape[1] * scale_factor_width), int(patch.shape[0] * scale_factor_height)))
 
         if generate_patch:
-            cv2.imwrite(f'camera_observations/patch_{control_object.engine.episode_step}.jpg', patch)
+            cv2.imwrite(f'camera_observations/patch_{control_object.engine.episode_step}.png', patch)
 
         scaled_location = (int(self.patch_location[0] * scale_factor_width), int(self.patch_location[1] * scale_factor_height)) # format (x, y)
         patch_object: DirtyRoadPatch = DirtyRoadPatch(

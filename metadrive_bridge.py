@@ -17,8 +17,9 @@ from metadrive_policy.lanedetection_policy_dpatch import LaneDetectionPolicy
 
 @dataclass
 class AttackConfig:
-    attack_at_step: int = 6000
+    attack_at_step: int = 6000 # set to -1 to disable patch rendering in MetaDrive
     two_pass_attack: bool = False
+    place_patch_in_image_stream: bool = False
 
 @dataclass
 class Settings:
@@ -27,7 +28,10 @@ class Settings:
     map_config: str = "SCS"
     headless_rendering: bool = False
     save_images: bool = False
+    save_probmaps: bool = False
     max_steps: int = 5000
+    patch_size_meters: tuple[float, float] = (1.0, 1.0) # (width, height) in meters
+    patch_geneneration_iterations: int = 90
     start_with_manual_control: bool = False
     simulator_window_size: tuple = (1280, 720) # (width, height)
     policy: str = "LaneDetectionPolicyE2E"
@@ -68,6 +72,10 @@ class MetaDriveBridge:
             traffic_density=0.0,
             map_config=self.map_config,
             num_scenarios=self.settings.num_scenarios,
+            save_probmaps=self.settings.save_probmaps,
+            patch_size_meters=self.settings.patch_size_meters,
+            place_patch_in_image_stream=self.settings.attack_config.place_patch_in_image_stream,
+            patch_geneneration_iterations=self.settings.patch_geneneration_iterations,
             decision_repeat=1,
             preload_models=False,
             manual_control=True,
@@ -81,6 +89,10 @@ class MetaDriveBridge:
         # delete all the previous camera observations
         for f in glob.glob("./camera_observations/*.jpg"):
             os.remove(f)
+        for f in glob.glob("./camera_observations/*.png"):
+            os.remove(f)
+        for f in glob.glob("./camera_observations/*.npy"):
+            os.remove(f)
 
     def run(self):
         self.cleanup()
@@ -90,7 +102,7 @@ class MetaDriveBridge:
             if self.settings.attack_config.two_pass_attack:
                 self.run_two_pass_attack()
             else:
-                self.config["enable_dirty_road_patch_attack"] = True
+                self.config["enable_dirty_road_patch_attack"] = True if self.settings.attack_config.attack_at_step > 0 else False
                 env = MetaDriveEnv(self.config)
                 self.run_simulation(env)
         else:

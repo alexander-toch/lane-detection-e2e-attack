@@ -17,6 +17,7 @@ from lanefitting import draw_lane
 
 # TARGET=None
 TARGET=np.load("attack/targets/turn_right.npy", allow_pickle=True).item()
+TARGET=np.load("attack/targets/right_new.npy", allow_pickle=True).item()
 START_ATTACK_AFTER = 50
 REGENERATE_INTERVAL = 100
 
@@ -30,12 +31,12 @@ class LaneDetectionPolicy(BasePolicy):
     # TODO: scale this proportional to offset
     STEERING_VALUE_RAD = np.deg2rad(60)
 
-    def __init__(self, control_object, random_seed=None, config=None):
+    def __init__(self, control_object, random_seed=None, config=None, init_pipeline=True):
         super(LaneDetectionPolicy, self).__init__(control_object, random_seed, config)
         self.target = TARGET
-        if self.target is not None:
+        if init_pipeline and self.target is not None:
             self.pipeline = PyTorchPipeline(targeted=True)
-        else:
+        elif init_pipeline:
             self.pipeline = PyTorchPipeline()       
         self.camera_observation = ImageStateObservation(get_global_config().copy())
         self.target_speed = self.NORMAL_SPEED

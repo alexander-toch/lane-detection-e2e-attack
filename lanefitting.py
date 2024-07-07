@@ -174,7 +174,7 @@ def calculate_radius(left_lane_poly, right_lane_poly, image_size: tuple):
     return radius
 
 
-def draw_lane(image, keypoints, image_size: tuple, transform_matrix=None):
+def draw_lane(image, keypoints, image_size: tuple, transform_matrix=None, draw_lane_overlay=True):
     if len(keypoints) < 2:
         print("No lanes detected")
         image_np = np.array(image)
@@ -204,7 +204,7 @@ def draw_lane(image, keypoints, image_size: tuple, transform_matrix=None):
     l2 = np.flip(np.transpose(np.vstack([right_fit, y_range])), axis=0) 
     pts = np.int_(np.vstack((l1, l2)))
 
-    image_np = np.array(image)
+    image_np = np.array(image) 
 
     colors = [(255,0,0), (0,255,0), (0,0,255), (0,255,255), (255,255,0), (255,0,255)]
     for i, lane in enumerate(keypoints):
@@ -230,11 +230,12 @@ def draw_lane(image, keypoints, image_size: tuple, transform_matrix=None):
     # end_point_transformed = perspective_warp(np.array([debug_info[3]]), transform_matrix_inv)[0]
     # cv2.arrowedLine(image_np, (int(width/2), int(height-3)), np.int_(end_point_transformed), (0, 0, 0), 1, cv2.LINE_AA)  
 
-    color_fill_image = cv2.fillPoly(color_fill_image, [pts], (0, 255, 0))  
-    color_fill_image_transformed = cv2.warpPerspective(color_fill_image, transform_matrix, (width, height), flags=cv2.WARP_INVERSE_MAP)
-    result = cv2.addWeighted(image_np, 1, color_fill_image_transformed, 0.2, 0, dtype=cv2.CV_8U)
+    if draw_lane_overlay:
+        color_fill_image = cv2.fillPoly(color_fill_image, [pts], (0, 255, 0))  
+        color_fill_image_transformed = cv2.warpPerspective(color_fill_image, transform_matrix, (width, height), flags=cv2.WARP_INVERSE_MAP)
+        image_np = cv2.addWeighted(image_np, 1, color_fill_image_transformed, 0.2, 0, dtype=cv2.CV_8U)
 
-    return result
+    return image_np
 
 def draw_lane_bev(image, keypoints, image_size: tuple, transform_matrix=None):
     if len(keypoints) < 2:

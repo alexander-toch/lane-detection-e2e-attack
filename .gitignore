@@ -112,6 +112,7 @@ datasets/
 __MACOSX/
 
 camera_observations/*.jpg
+camera_observations/*.png
 camera_observations/*.npy
 camera_observations/archive/*
 drive.gif
