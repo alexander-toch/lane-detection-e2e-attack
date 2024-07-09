@@ -37,8 +37,10 @@ class LaneDetectionPolicyE2E(LaneDetectionPolicy):
 
         # print(f"Window size: {w}, {h}, Patch size (px): {self.patch_size}, location: {self.patch_location}")
 
+        self.lane_detection_model = get_global_config()["lane_detection_model"]
         self.pipeline = PyTorchPipeline(targeted=True, patch_size=(self.patch_size[1], self.patch_size[0]), 
-                                        max_iterations=get_global_config()["patch_geneneration_iterations"])
+                                        max_iterations=get_global_config()["patch_geneneration_iterations"],
+                                        model=self.lane_detection_model)
 
     def io_worker(self):
         while not self.stop_event.isSet():
@@ -119,7 +121,7 @@ class LaneDetectionPolicyE2E(LaneDetectionPolicy):
 
         if (int(current_car_pos_meter) == attack_at_meter and self.control_object.engine.dirty_road_patch_object is None) or get_global_config()["place_patch_in_image_stream"] is True:
             regenerate_patch = True if get_global_config()["place_patch_in_image_stream"] is True and self.control_object.engine.episode_step % REGENERATE_INTERVAL == 0 else False
-            offset_center, _, keypoints, patch_object = (
+            _, _, _, patch_object = (
                 self.pipeline.infer_offset_center_with_dpatch(image, (image_size[1], image_size[0]), self.control_object, regenerate_patch, target=self.target, image_on_cuda=image_on_cuda) # important: swap image_size order
             )
             debug_info = {
@@ -137,6 +139,11 @@ class LaneDetectionPolicyE2E(LaneDetectionPolicy):
             im, im_softmax = self.get_probmap_images(patch_object.probmaps, image_size)
             plt.imsave(f"camera_observations/patched_probmap_{str(self.control_object.engine.episode_step)}_merged.png", im, cmap='seismic')
             plt.imsave(f"camera_observations/patched_softmax_probmap_{str(self.control_object.engine.episode_step)}_merged.png", im_softmax, cmap='seismic')
+
+            if not get_global_config()["place_patch_in_image_stream"]:
+                offset_center, _, keypoints, debug_info = (
+                    self.pipeline.infer_offset_center(image, (image_size[1], image_size[0]), self.control_object, image_on_cuda, self.ipm) # important: swap image_size order
+                )
         else: 
             if attack_active and get_global_config()["patch_color_replace"]:
                 # find white pixels
@@ -150,11 +157,13 @@ class LaneDetectionPolicyE2E(LaneDetectionPolicy):
                     min_y = np.min(white[0])
                     max_y = np.max(white[0])
 
-                    # resize patch to fit bounding box
-                    patch = cp.asarray(cv2.resize((self.control_object.engine.dirty_road_patch_object.patch * 255).astype(np.uint8), (max_x - min_x, max_y - min_y), interpolation=cv2.INTER_NEAREST_EXACT))
-                    # fill area with patch
-                    # (H, W, C)
-                    image[min_y:max_y, min_x:max_x] = patch
+                    # only place patch if the bounding box is greater 10x10
+                    if max_x - min_x > 10 and max_y - min_y > 10:
+                        # resize patch to fit bounding box
+                        patch = cp.asarray(cv2.resize((self.control_object.engine.dirty_road_patch_object.patch * 255).astype(np.uint8), (max_x - min_x, max_y - min_y), interpolation=cv2.INTER_NEAREST_EXACT))
+                        # fill area with patch
+                        # (H, W, C)
+                        image[min_y:max_y, min_x:max_x] = patch
 
 
             offset_center, _, keypoints, debug_info = (
@@ -185,7 +194,7 @@ class LaneDetectionPolicyE2E(LaneDetectionPolicy):
         # action = [0, self.acceleration()] # for disbling steering
 
         # TODO: add a flag to enable image saving and interval
-        if self.control_object.engine.episode_step % 10 == 0:
+        if self.control_object.engine.episode_step % 100 == 0:
             print(f"Step: {self.control_object.engine.episode_step}, offset_center: {offset_center}, steering: {steering}")
             if patch_object is not None and patch_object.input_image_sizes == tuple(reversed(image_size)):
                 im = np.array(patch_object.model_in).transpose((1, 2, 0))
@@ -220,3 +229,7 @@ class LaneDetectionPolicyE2E(LaneDetectionPolicy):
                 np.save(f"camera_observations/probmap_{str(self.control_object.engine.episode_step)}.npy", debug_info['probmaps'])
 
         return action
+
+    def destroy(self):
+        super(LaneDetectionPolicyE2E, self).destroy()
+        self.pipeline.destroy()

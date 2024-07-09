@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import gc
 from random import randint
 import cv2
 from attack.pytorch_auto_drive.utils.runners.base import BaseTrainer
@@ -23,18 +24,7 @@ from pytorch_auto_drive.utils import (
     lane_detection_visualize_batched,
 )
 
-MODEL="resa"
 script_dir=os.path.dirname(os.path.realpath(__file__))
-
-if MODEL == "baseline":
-    CONFIG=os.path.join(script_dir, 'attack/pytorch_auto_drive/configs/lane_detection/baseline/resnet50_culane.py').replace('\\','/')
-    CHECKPOINT=os.path.join(script_dir, '../resnet50_baseline_culane_20210308.pt').replace('\\','/')
-elif MODEL == "resa":
-    CONFIG=os.path.join(script_dir, 'attack/pytorch_auto_drive/configs/lane_detection/resa/resnet50_culane.py').replace('\\','/')
-    CHECKPOINT=os.path.join(script_dir, '../resnet50_resa_culane_20211016.pt').replace('\\','/')
-elif MODEL == "scnn":
-    CONFIG=os.path.join(script_dir, 'attack/pytorch_auto_drive/configs/lane_detection/scnn/resnet50_culane.py').replace('\\','/')
-    CHECKPOINT=os.path.join(script_dir, '../resnet50_scnn_culane_20210311.pt').replace('\\','/')
 
 @dataclass
 class DirtyRoadPatch:
@@ -46,8 +36,19 @@ class DirtyRoadPatch:
     input_image_sizes: tuple = None
 
 class PyTorchPipeline:
-    def __init__(self, model_path=ONNX_MODEL_PATH, targeted=False, patch_size=(120,300), patch_location=(200,160), max_iterations=50):
-        self.cfg = read_config(CONFIG)
+    def __init__(self, model_path=ONNX_MODEL_PATH, targeted=False, patch_size=(120,300), patch_location=(200,160), max_iterations=50, model="resa"):
+        
+        if model == "baseline":
+            CONFIG=os.path.join(script_dir, 'attack/pytorch_auto_drive/configs/lane_detection/baseline/resnet50_culane.py').replace('\\','/')
+            CHECKPOINT=os.path.join(script_dir, '../resnet50_baseline_culane_20210308.pt').replace('\\','/')
+        elif model == "resa":
+            CONFIG=os.path.join(script_dir, 'attack/pytorch_auto_drive/configs/lane_detection/resa/resnet50_culane.py').replace('\\','/')
+            CHECKPOINT=os.path.join(script_dir, '../resnet50_resa_culane_20211016.pt').replace('\\','/')
+        elif model == "scnn":
+            CONFIG=os.path.join(script_dir, 'attack/pytorch_auto_drive/configs/lane_detection/scnn/resnet50_culane.py').replace('\\','/')
+            CHECKPOINT=os.path.join(script_dir, '../resnet50_scnn_culane_20210311.pt').replace('\\','/')
+
+        self.cfg = read_config(CONFIG) 
         self.model = MODELS.from_dict(self.cfg['model'])
         self.current_patch = None
 
@@ -59,7 +60,7 @@ class PyTorchPipeline:
 
         brightness_range= (0.8, 1.0)
         rotation_weights = (0.4, 0.2, 0.2, 0.2)
-        optimizer = BaseTrainer.get_optimizer(self.cfg['optimizer'], self.model)
+        self.optimizer = BaseTrainer.get_optimizer(self.cfg['optimizer'], self.model)
 
         loss_config = dict(
             name='LaneLossSeg',
@@ -80,18 +81,18 @@ class PyTorchPipeline:
         self.patch_size = patch_size
         self.patch_location=(int(input_size[1]/2 - self.patch_size[0] / 2), int(input_size[0] - self.patch_size[1]))
 
-        classifier = MyPyTorchClassifier(
+        self.classifier = MyPyTorchClassifier(
             model=self.model,
             loss=loss,
             clip_values=clip_values,
-            optimizer=optimizer,
+            optimizer=self.optimizer,
             input_shape=(1, input_size[0], input_size[1]),
             nb_classes=num_classes,
             channels_first=True,
         )
 
         self.targeted = targeted
-        self.attack = MyRobustDPatch(estimator=classifier, 
+        self.attack = MyRobustDPatch(estimator=self.classifier, 
                         max_iter=max_iterations,
                         sample_size=1, #max(int(max_iterations/90), 1),
                         patch_shape=(3, self.patch_size[0], self.patch_size[1]), 
@@ -273,3 +274,14 @@ class PyTorchPipeline:
         )
 
         return off_center, lane_heading_theta, keypoints[0], patch_object
+
+    def destroy(self):
+        self.model.cpu()
+        del self.model
+        del self.classifier
+        self.attack = None
+        self.current_patch = None
+        del self.optimizer
+        gc.collect()
+        torch.cuda.empty_cache()
+        

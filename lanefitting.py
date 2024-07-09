@@ -131,6 +131,8 @@ def perspective_warp(points, transform_matrix):
 
 
 def fit_lane(lane):
+    import warnings
+    warnings.simplefilter('ignore', np.RankWarning)
     polynom = np.polyfit(lane[:, 1], lane[:, 0], 2)  # note that we are fitting for y, x
     polynom_function = np.poly1d(
         polynom
