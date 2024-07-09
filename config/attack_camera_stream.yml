@@ -10,6 +10,6 @@ simulator_window_size:
 - 288
 policy: LaneDetectionPolicyE2E
 attack_config:
-  attack_at_step: -1
+  attack_at_meter: -1
   two_pass_attack: false
   place_patch_in_image_stream: true

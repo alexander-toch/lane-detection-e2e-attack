@@ -118,7 +118,7 @@ if __name__ == "__main__":
 
     # ATTACK STEP 1: Drive without attack and generate the 
     config["enable_dirty_road_patch_attack"] = False
-    config["dirty_road_patch_attack_step_index"] = ATTACK_INDEX
+    config["dirty_road_patch_attack_at_meter"] = ATTACK_INDEX
 
     env = MetaDriveEnv(config)
     run_simulation(env)

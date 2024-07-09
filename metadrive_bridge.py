@@ -17,9 +17,10 @@ from metadrive_policy.lanedetection_policy_dpatch import LaneDetectionPolicy
 
 @dataclass
 class AttackConfig:
-    attack_at_step: int = 6000 # set to -1 to disable patch rendering in MetaDrive
+    attack_at_meter: int = 6000 # set to -1 to disable patch rendering in MetaDrive
     two_pass_attack: bool = False
     place_patch_in_image_stream: bool = False
+    patch_color_replace: bool = False
 
 @dataclass
 class Settings:
@@ -59,6 +60,7 @@ class MetaDriveBridge:
             },
             vehicle_config={
                 "image_source": "rgb_camera",
+                "show_navi_mark": False,
             },
             agent_policy=self.policy,
             start_seed=self.settings.seed,
@@ -76,6 +78,7 @@ class MetaDriveBridge:
             patch_size_meters=self.settings.patch_size_meters,
             place_patch_in_image_stream=self.settings.attack_config.place_patch_in_image_stream,
             patch_geneneration_iterations=self.settings.patch_geneneration_iterations,
+            patch_color_replace=self.settings.attack_config.patch_color_replace,
             decision_repeat=1,
             preload_models=False,
             manual_control=True,
@@ -98,11 +101,11 @@ class MetaDriveBridge:
         self.cleanup()
 
         if self.settings.attack_config is not None:
-            self.config["dirty_road_patch_attack_step_index"]= self.settings.attack_config.attack_at_step
+            self.config["dirty_road_patch_attack_at_meter"]= self.settings.attack_config.attack_at_meter
             if self.settings.attack_config.two_pass_attack:
                 self.run_two_pass_attack()
             else:
-                self.config["enable_dirty_road_patch_attack"] = True if self.settings.attack_config.attack_at_step > 0 else False
+                self.config["enable_dirty_road_patch_attack"] = True if self.settings.attack_config.attack_at_meter > 0 else False
                 env = MetaDriveEnv(self.config)
                 self.run_simulation(env)
         else:
@@ -119,7 +122,6 @@ class MetaDriveBridge:
 
         # ATTACK PASS 2: Drive with mounted patch
         env.engine.global_config["enable_dirty_road_patch_attack"] = True
-        env.engine.global_config["dirty_road_patch_attack_step_index"] = -1
         self.run_simulation(env)
 
     def run_simulation(self, env: MetaDriveEnv):

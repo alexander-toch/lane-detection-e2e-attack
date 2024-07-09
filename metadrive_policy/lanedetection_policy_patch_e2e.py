@@ -6,6 +6,7 @@ from metadrive.engine.engine_utils import get_global_config
 from metadrive.utils.math import wrap_to_pi
 from PIL import Image
 import numpy as np
+import cupy as cp
 import matplotlib.pyplot as plt
 import sys, os
 import torch
@@ -16,7 +17,7 @@ sys.path.append(os.path.dirname(os.getcwd()))
 from inference_pytorch import PyTorchPipeline
 from lanefitting import draw_lane, draw_lane_bev, get_ipm_via_camera_config
 
-TARGET=np.load("attack/targets/turn_right.npy", allow_pickle=True).item()
+TARGET=np.load("attack/targets/right_new.npy", allow_pickle=True).item()
 REGENERATE_INTERVAL = 150
 
 class LaneDetectionPolicyE2E(LaneDetectionPolicy):
@@ -32,10 +33,12 @@ class LaneDetectionPolicyE2E(LaneDetectionPolicy):
         patch_w, patch_h = get_global_config()["patch_size_meters"]
         PX_PER_METER = (80, 80) # TODO: find these values dynamically
         self.patch_size = (int(patch_w * PX_PER_METER[0]), int(patch_h * PX_PER_METER[1]))  # (width, height), will be swapped for Pipeline
-        self.patch_location=(int(w/2 - self.patch_size[0] / 2), int(h - self.patch_size[1])) # in format (W, H). (800, 288) is input size for resa
+        # self.patch_location=(int(w/2 - self.patch_size[0] / 2), int(h - self.patch_size[1])) # in format (W, H). (800, 288) is input size for resa
+
+        # print(f"Window size: {w}, {h}, Patch size (px): {self.patch_size}, location: {self.patch_location}")
 
         self.pipeline = PyTorchPipeline(targeted=True, patch_size=(self.patch_size[1], self.patch_size[0]), 
-                                        patch_location=self.patch_location, max_iterations=get_global_config()["patch_geneneration_iterations"])
+                                        max_iterations=get_global_config()["patch_geneneration_iterations"])
 
     def io_worker(self):
         while not self.stop_event.isSet():
@@ -86,7 +89,8 @@ class LaneDetectionPolicyE2E(LaneDetectionPolicy):
 
 
         image_on_cuda = get_global_config()["image_on_cuda"]
-        attack_step_index = get_global_config()["dirty_road_patch_attack_step_index"]
+        attack_at_meter = get_global_config()["dirty_road_patch_attack_at_meter"]
+        attack_active = get_global_config()["enable_dirty_road_patch_attack"]
 
         if not image_on_cuda:
             image = Image.fromarray((observation["image"][..., -1] * 255).astype(np.uint8))
@@ -111,7 +115,9 @@ class LaneDetectionPolicyE2E(LaneDetectionPolicy):
             self.ipm = get_ipm_via_camera_config(ipm_input_image, fx, fy)
 
         patch_object = None
-        if self.control_object.engine.episode_step == attack_step_index or get_global_config()["place_patch_in_image_stream"] is True:
+        current_car_pos_meter = self.control_object.origin.getPos()[0]
+
+        if (int(current_car_pos_meter) == attack_at_meter and self.control_object.engine.dirty_road_patch_object is None) or get_global_config()["place_patch_in_image_stream"] is True:
             regenerate_patch = True if get_global_config()["place_patch_in_image_stream"] is True and self.control_object.engine.episode_step % REGENERATE_INTERVAL == 0 else False
             offset_center, _, keypoints, patch_object = (
                 self.pipeline.infer_offset_center_with_dpatch(image, (image_size[1], image_size[0]), self.control_object, regenerate_patch, target=self.target, image_on_cuda=image_on_cuda) # important: swap image_size order
@@ -132,6 +138,25 @@ class LaneDetectionPolicyE2E(LaneDetectionPolicy):
             plt.imsave(f"camera_observations/patched_probmap_{str(self.control_object.engine.episode_step)}_merged.png", im, cmap='seismic')
             plt.imsave(f"camera_observations/patched_softmax_probmap_{str(self.control_object.engine.episode_step)}_merged.png", im_softmax, cmap='seismic')
         else: 
+            if attack_active and get_global_config()["patch_color_replace"]:
+                # find white pixels
+                image_cpu = image.get() * 255 if image_on_cuda else image
+                white = np.where(np.all(image_cpu == [255, 255, 255], axis=-1))
+
+                # find bounding box if we have white pixel
+                if white[0].shape[0] > 1 and white[1].shape[0] > 1:
+                    min_x = np.min(white[1])
+                    max_x = np.max(white[1])
+                    min_y = np.min(white[0])
+                    max_y = np.max(white[0])
+
+                    # resize patch to fit bounding box
+                    patch = cp.asarray(cv2.resize((self.control_object.engine.dirty_road_patch_object.patch * 255).astype(np.uint8), (max_x - min_x, max_y - min_y), interpolation=cv2.INTER_NEAREST_EXACT))
+                    # fill area with patch
+                    # (H, W, C)
+                    image[min_y:max_y, min_x:max_x] = patch
+
+
             offset_center, _, keypoints, debug_info = (
                 self.pipeline.infer_offset_center(image, (image_size[1], image_size[0]), self.control_object, image_on_cuda, self.ipm) # important: swap image_size order
             )

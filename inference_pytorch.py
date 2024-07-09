@@ -57,18 +57,11 @@ class PyTorchPipeline:
             cuda_idx = torch.cuda.current_device()
             self.device = torch.device(f"cuda:{cuda_idx}")
 
-
-        # config for 1280x720
-        # self.patch_size = (120,300) # (height, width)
-        # self.patch_location=(200,160) # in format (W, H). (800, 288) is input size for resa
-        self.patch_size = patch_size
-        self.patch_location=patch_location
-
         brightness_range= (0.8, 1.0)
         rotation_weights = (0.4, 0.2, 0.2, 0.2)
         optimizer = BaseTrainer.get_optimizer(self.cfg['optimizer'], self.model)
 
-        loss_config = loss = dict(
+        loss_config = dict(
             name='LaneLossSeg',
             ignore_index=255,
             weight=[0.4, 1, 1, 1, 1]
@@ -81,6 +74,11 @@ class PyTorchPipeline:
 
         clip_values = (0, 255)
 
+        # config for 1280x720
+        # self.patch_size = (120,300) # (height, width)
+        # self.patch_location=(200,160) # in format (W, H). (800, 288) is input size for resa
+        self.patch_size = patch_size
+        self.patch_location=(int(input_size[1]/2 - self.patch_size[0] / 2), int(input_size[0] - self.patch_size[1]))
 
         classifier = MyPyTorchClassifier(
             model=self.model,
@@ -95,11 +93,11 @@ class PyTorchPipeline:
         self.targeted = targeted
         self.attack = MyRobustDPatch(estimator=classifier, 
                         max_iter=max_iterations,
-                        sample_size=max(int(max_iterations/90), 1),
+                        sample_size=1, #max(int(max_iterations/90), 1),
                         patch_shape=(3, self.patch_size[0], self.patch_size[1]), 
                         patch_location=self.patch_location,
                         brightness_range=brightness_range,
-                        learning_rate=5.0,
+                        learning_rate=0.2, #5.0,
                         targeted=self.targeted
                         # rotation_weights=rotation_weights,
                     )
@@ -145,7 +143,7 @@ class PyTorchPipeline:
         if image_on_cuda:
             model_in = image.unsqueeze(0)
             results = self.model(model_in)
-            self.save_image(model_in[0].cpu().numpy(), f'camera_observations/{control_object.engine.episode_step}_model_input.png')
+            # self.save_image(model_in[0].cpu().numpy(), f'camera_observations/{control_object.engine.episode_step}_model_input.png') # TODO: add a setting
         else:
             model_in = torch.ByteTensor(torch.ByteStorage.from_buffer(image.tobytes()))
             model_in = model_in.view(image.size[1], image.size[0], len(image.getbands()))

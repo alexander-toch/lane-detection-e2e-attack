@@ -1,14 +1,20 @@
 seed: 1235
 num_scenarios: 1
-map_config: SS
+map_config: SCS
 headless_rendering: false
 save_images: false
-max_steps: 600
+max_steps: 500
 start_with_manual_control: false
+patch_geneneration_iterations: 200
+save_probmaps: false
+patch_size_meters:
+- 1.0
+- 1.0
 simulator_window_size:
 - 800
 - 288
 policy: LaneDetectionPolicyE2E
 attack_config:
   attack_at_meter: 50
-  two_pass_attack: false
+  two_pass_attack: true
+  patch_color_replace: true
