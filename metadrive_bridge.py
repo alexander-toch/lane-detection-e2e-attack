@@ -43,6 +43,7 @@ class Settings:
     simulator_window_size: tuple = (1280, 720) # (width, height)
     policy: str = "LaneDetectionPolicyE2E"
     attack_config: AttackConfig | None = field(default_factory=AttackConfig)
+    lanes_per_direction: int = 2
 
 class AttackType(str, Enum):
     none = 'None'
@@ -61,7 +62,7 @@ class MetaDriveBridge:
             BaseMap.GENERATE_TYPE: MapGenerateMethod.BIG_BLOCK_SEQUENCE,
             # BaseMap.GENERATE_CONFIG: 3,
             BaseMap.LANE_WIDTH: 3.5,
-            BaseMap.LANE_NUM: 2,
+            BaseMap.LANE_NUM: self.settings.lanes_per_direction,
         }
 
         self.database = ExperimentDatabase("experiments.db")
@@ -100,7 +101,7 @@ class MetaDriveBridge:
             },
             agent_configs={
                 "default_agent": {
-                    "spawn_lane_index": (FirstPGBlock.NODE_1, FirstPGBlock.NODE_2, 1),
+                    "spawn_lane_index": (FirstPGBlock.NODE_1, FirstPGBlock.NODE_2, 0 if self.settings.lanes_per_direction == 1 else 1),
                 }
             },
             show_coordinates=False,
@@ -109,11 +110,13 @@ class MetaDriveBridge:
             start_seed=self.settings.seed,
             image_on_cuda=True,
             image_observation=True,
-            out_of_route_done=True,
+            out_of_route_done=False,
             on_continuous_line_done=True,
             crash_vehicle_done=True,
             crash_object_done=True,
             crash_human_done=True,
+            crash_sidewalk_done=True,
+            relax_out_of_road_done=False,
             traffic_density=0.0,
             map_config=self.map_config,
             num_scenarios=self.settings.num_scenarios,
@@ -179,6 +182,22 @@ class MetaDriveBridge:
             
             current_seed += 1
             env.engine.global_config["enable_dirty_road_patch_attack"] = False
+            env.engine.get_policy(env.agent.name).control_object.engine.dirty_road_patch_object = None
+
+    def get_end_reason(self, info, step_index, steps):
+        if info[TerminationState.SUCCESS] or info[TerminationState.MAX_STEP] or step_index >= self.settings.max_steps:
+            last_steps_to_check = 20 if len(steps) > 10 else int(len(steps) / 10)
+            if len(list(filter(lambda x: x["offset_center"] is None, steps[-last_steps_to_check:]))) / last_steps_to_check > 0.8:
+                return "NO_LANES_DETECTED"
+            return "SUCCESS"
+        elif info[TerminationState.OUT_OF_ROAD]:
+            return "OUT_OF_ROAD"
+        elif info[TerminationState.CRASH_OBJECT]:
+            return "CRASH_OBJECT"
+        elif info[TerminationState.CRASH_SIDEWALK]:
+            return "OUT_OF_ROAD"
+        else:
+            return "UNKNOWN"
 
     def run_simulation(self, env: MetaDriveEnv):
 
@@ -217,37 +236,29 @@ class MetaDriveBridge:
                             * 255,
                         )
 
-                #  current_car_pos_meter = self.control_object.origin.getPos()[0]
+                policy = env.engine.get_policy(env.agent.name)
                 current_car_pos_meter = env.agent.position[0]
 
                 if tm or tc or step_index >= self.settings.max_steps: 
-                    end_reason = "UNKNOWN"
-                    if info[TerminationState.SUCCESS]:
-                        end_reason = "SUCCESS"
-                    elif info[TerminationState.OUT_OF_ROAD]:
-                        end_reason = "OUT_OF_ROAD"
-                    elif info[TerminationState.CRASH_OBJECT]:
-                        end_reason = "CRASH_OBJECT"
-                    elif info[TerminationState.MAX_STEP]:
-                        end_reason = "SUCCESS"
-                    elif step_index >= self.settings.max_steps:
-                        end_reason = "SUCCESS"
+                    end_reason = self.get_end_reason(info, step_index, policy.step_infos)
                 
                     print(f"Simulation with seed {env.current_seed} ended at step {step_index} with reason: {end_reason}. Attack active: {env.engine.global_config['enable_dirty_road_patch_attack']}")
-                    self.database.add_simulation(self.experiment_id, 
+                    sim_id = self.database.add_simulation(self.experiment_id, 
                                         env.current_seed, 
                                         self.settings.map_config, 
+                                        self.settings.max_steps,
                                         start_time, 
                                         datetime.datetime.now(), 
                                         env.engine.global_config["enable_dirty_road_patch_attack"], 
                                         self.settings.patch_geneneration_iterations, 
-                                        self.settings.attack_config.attack_at_meter, 
+                                        self.settings.attack_config.attack_at_meter if self.settings.attack_config is not None else -1, 
                                         self.settings.simulator_window_size[0], 
                                         self.settings.simulator_window_size[1], 
                                         self.settings.lane_detection_model, 
                                         end_reason,
                                         step_index,
                                         current_car_pos_meter)
+                    self.database.add_simulation_steps(sim_id, policy.step_infos)
 
                     if env.current_seed + 1 < env.start_seed + env.num_scenarios:   
                         env.reset(env.current_seed + 1)
@@ -259,20 +270,23 @@ class MetaDriveBridge:
             except KeyboardInterrupt as e:
                 raise e
             except Exception:
-                self.database.add_simulation(self.experiment_id, 
+                sim_id = self.database.add_simulation(self.experiment_id, 
                     env.current_seed, 
                     self.settings.map_config, 
+                    self.settings.max_steps,
                     start_time, 
                     datetime.datetime.now(), 
                     env.engine.global_config["enable_dirty_road_patch_attack"], 
                     self.settings.patch_geneneration_iterations, 
-                    self.settings.attack_config.attack_at_meter, 
+                    self.settings.attack_config.attack_at_meter if self.settings.attack_config is not None else -1, 
                     self.settings.simulator_window_size[0], 
                     self.settings.simulator_window_size[1], 
                     self.settings.lane_detection_model, 
                     "ERROR",
                     step_index,
                     current_car_pos_meter)      
+                self.database.add_simulation_steps(sim_id, policy.step_infos)
+
                 import traceback
                 print(traceback.format_exc())
                 break

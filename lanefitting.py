@@ -161,7 +161,7 @@ def calculate_radius(left_lane_poly, right_lane_poly, image_size: tuple):
     right_curverad = ((1 + (2 * right_fit_cr[0] * height * ym_per_pix + right_fit_cr[1]) ** 2) ** 1.5) / np.absolute(
         2 * right_fit_cr[0])
 
-    radius1 = round((float(left_curverad) + float(right_curverad))/2.,2)
+    radius1 = max(round((float(left_curverad) + float(right_curverad))/2.,2), 0.0001)
 
     if left_fit[0] - left_fit[-1] < -60:
         # curve_direction = 'Left'
@@ -359,7 +359,7 @@ def get_ipm_via_camera_config(image, fx, fy, res=1):
         'roll': 0.0, 
         'XCam': 0.0, 
         'YCam': 0.0, 
-        'ZCam': 1.5
+        'ZCam': 1.0
     }
 
     cam = Camera(config)

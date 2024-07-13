@@ -1,7 +1,7 @@
-import pickle
 import queue
 import threading
 import cv2
+import datetime
 from metadrive.engine.engine_utils import get_global_config
 from metadrive.utils.math import wrap_to_pi
 from PIL import Image
@@ -21,6 +21,9 @@ TARGET=np.load("attack/targets/right_new.npy", allow_pickle=True).item()
 REGENERATE_INTERVAL = 150
 
 class LaneDetectionPolicyE2E(LaneDetectionPolicy):
+    NORMAL_SPEED = 100  # km/h
+    ACC_FACTOR = 3.0
+
     def __init__(self, control_object, random_seed=None, config=None):
         super(LaneDetectionPolicyE2E, self).__init__(control_object, random_seed, config, init_pipeline=False)
         self.io_tasks = queue.Queue()
@@ -28,6 +31,7 @@ class LaneDetectionPolicyE2E(LaneDetectionPolicy):
         self.io_thread = threading.Thread(target=self.io_worker, daemon=True)
         self.io_thread.start()
         self.ipm = None
+        self.step_infos = []
         
         w, h = get_global_config()["window_size"][0], get_global_config()["window_size"][1]
         patch_w, patch_h = get_global_config()["patch_size_meters"]
@@ -151,7 +155,7 @@ class LaneDetectionPolicyE2E(LaneDetectionPolicy):
                 white = np.where(np.all(image_cpu == [255, 255, 255], axis=-1))
 
                 # find bounding box if we have white pixel
-                if white[0].shape[0] > 1 and white[1].shape[0] > 1:
+                if white[0].shape[0] > 1 and white[1].shape[0] > 1 and self.control_object.engine.dirty_road_patch_object is not None:
                     min_x = np.min(white[1])
                     max_x = np.max(white[1])
                     min_y = np.min(white[0])
@@ -170,12 +174,10 @@ class LaneDetectionPolicyE2E(LaneDetectionPolicy):
                 self.pipeline.infer_offset_center(image, (image_size[1], image_size[0]), self.control_object, image_on_cuda, self.ipm) # important: swap image_size order
             )
 
-        # v_heading = self.control_object.heading_theta  # current vehicle heading
-        # steering = self.heading_pid.get_result(
-        #     -wrap_to_pi(lane_heading_theta - v_heading)
-        # )
 
-        STEERING_VALUE_RAD = np.deg2rad(15)
+        # TODO: scale steering value based on offset_center
+
+        STEERING_VALUE_RAD = np.deg2rad(20)
         self.target_speed = self.NORMAL_SPEED
         if offset_center is None:
             steering = self.lateral_pid.get_result(0)
@@ -192,6 +194,16 @@ class LaneDetectionPolicyE2E(LaneDetectionPolicy):
 
         action = [steering, self.acceleration()]
         # action = [0, self.acceleration()] # for disbling steering
+
+        self.step_infos.append({
+            "step": self.control_object.engine.episode_step,
+            "time": datetime.datetime.now(),
+            "offset_center": offset_center,	
+            "car_position_x_meter": current_car_pos_meter,
+            "steering": steering,
+            "speed": self.control_object.speed_km_h,
+            "throttle_brake": self.control_object.throttle_brake,
+        })
 
         # TODO: add a flag to enable image saving and interval
         if self.control_object.engine.episode_step % 100 == 0:
