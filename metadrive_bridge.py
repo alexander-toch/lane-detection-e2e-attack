@@ -169,7 +169,9 @@ class MetaDriveBridge:
         while current_seed < self.settings.seed + self.settings.num_scenarios:
             # ATTACK PASS 1: Drive without attack and generate the patch
             print(f"Pass 1: Running simulation with seed {current_seed} with attack disabled.")
-            self.config["enable_dirty_road_patch_attack"] = False
+            # self.config["enable_dirty_road_patch_attack"] = False
+            if self.settings.attack_config.place_patch_in_image_stream:
+                env.dirty_road_patch_attack_at_meter = -1
             env.start_seed = current_seed
             env.start_index = current_seed
             env.num_scenarios = 1
@@ -178,6 +180,8 @@ class MetaDriveBridge:
             # ATTACK PASS 2: Drive with mounted patch
             print(f"Pass 2: Running simulation with seed {current_seed} with attack enabled.")
             env.engine.global_config["enable_dirty_road_patch_attack"] = True
+            if self.settings.attack_config.place_patch_in_image_stream:
+                env.engine.global_config["dirty_road_patch_attack_at_meter"] = self.settings.attack_config.attack_at_meter
             self.run_simulation(env)
             
             current_seed += 1
@@ -187,7 +191,7 @@ class MetaDriveBridge:
     def get_end_reason(self, info, step_index, steps):
         if info[TerminationState.SUCCESS] or info[TerminationState.MAX_STEP] or step_index >= self.settings.max_steps:
             last_steps_to_check = 20 if len(steps) > 10 else int(len(steps) / 10)
-            if len(list(filter(lambda x: x["offset_center"] is None, steps[-last_steps_to_check:]))) / last_steps_to_check > 0.8:
+            if len(list(filter(lambda x: x["offset_center"] is None, steps[-last_steps_to_check:]))) / last_steps_to_check >= 0.5:
                 return "NO_LANES_DETECTED"
             return "SUCCESS"
         elif info[TerminationState.OUT_OF_ROAD]:
@@ -210,6 +214,7 @@ class MetaDriveBridge:
 
         start_time = datetime.datetime.now()
         step_index = 0
+        offsets_center_simulator = []
         while True:
             try:
                 o, r, tm, tc, info = env.step([0,0])
@@ -239,6 +244,9 @@ class MetaDriveBridge:
                 policy = env.engine.get_policy(env.agent.name)
                 current_car_pos_meter = env.agent.position[0]
 
+                # Used for calculation of E2E-LD metric
+                offsets_center_simulator.append(abs(policy.step_infos[-1]["offset_center_simulator"]))
+
                 if tm or tc or step_index >= self.settings.max_steps: 
                     end_reason = self.get_end_reason(info, step_index, policy.step_infos)
                 
@@ -257,7 +265,8 @@ class MetaDriveBridge:
                                         self.settings.lane_detection_model, 
                                         end_reason,
                                         step_index,
-                                        current_car_pos_meter)
+                                        current_car_pos_meter,
+                                        max(offsets_center_simulator) if len(offsets_center_simulator) > 0 else None)
                     self.database.add_simulation_steps(sim_id, policy.step_infos)
 
                     if env.current_seed + 1 < env.start_seed + env.num_scenarios:   
@@ -284,7 +293,8 @@ class MetaDriveBridge:
                     self.settings.lane_detection_model, 
                     "ERROR",
                     step_index,
-                    current_car_pos_meter)      
+                    current_car_pos_meter,
+                    max(offsets_center_simulator) if len(offsets_center_simulator) > 0 else None)      
                 self.database.add_simulation_steps(sim_id, policy.step_infos)
 
                 import traceback

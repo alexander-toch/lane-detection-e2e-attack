@@ -97,6 +97,7 @@ class LaneDetectionPolicyE2E(LaneDetectionPolicy):
         image_on_cuda = get_global_config()["image_on_cuda"]
         attack_at_meter = get_global_config()["dirty_road_patch_attack_at_meter"]
         attack_active = get_global_config()["enable_dirty_road_patch_attack"]
+        place_patch_in_image_stream = get_global_config()["place_patch_in_image_stream"]
 
         if not image_on_cuda:
             image = Image.fromarray((observation["image"][..., -1] * 255).astype(np.uint8))
@@ -121,11 +122,13 @@ class LaneDetectionPolicyE2E(LaneDetectionPolicy):
             self.ipm = get_ipm_via_camera_config(ipm_input_image, fx, fy)
 
         patch_object = None
-        current_car_pos_meter = self.control_object.origin.getPos()[0]
+        current_car_pos_meter = self.control_object.origin.getPos()[0] # FIXME: this only works for straight roads, use navigation.travelled_length ?
+        current_car_center_offset = self.control_object.dist_to_center
 
-        if (int(current_car_pos_meter) == attack_at_meter and self.control_object.engine.dirty_road_patch_object is None) or get_global_config()["place_patch_in_image_stream"] is True:
+        if (not place_patch_in_image_stream and int(current_car_pos_meter) == attack_at_meter and self.control_object.engine.dirty_road_patch_object is None) or \
+            (place_patch_in_image_stream and attack_active and int(current_car_pos_meter) >= attack_at_meter):
             regenerate_patch = True if get_global_config()["place_patch_in_image_stream"] is True and self.control_object.engine.episode_step % REGENERATE_INTERVAL == 0 else False
-            _, _, _, patch_object = (
+            offset_center, _, _, patch_object = (
                 self.pipeline.infer_offset_center_with_dpatch(image, (image_size[1], image_size[0]), self.control_object, regenerate_patch, target=self.target, image_on_cuda=image_on_cuda) # important: swap image_size order
             )
             debug_info = {
@@ -199,6 +202,7 @@ class LaneDetectionPolicyE2E(LaneDetectionPolicy):
             "step": self.control_object.engine.episode_step,
             "time": datetime.datetime.now(),
             "offset_center": offset_center,	
+            "offset_center_simulator": current_car_center_offset,
             "car_position_x_meter": current_car_pos_meter,
             "steering": steering,
             "speed": self.control_object.speed_km_h,
@@ -207,7 +211,7 @@ class LaneDetectionPolicyE2E(LaneDetectionPolicy):
 
         # TODO: add a flag to enable image saving and interval
         if self.control_object.engine.episode_step % 100 == 0:
-            print(f"Step: {self.control_object.engine.episode_step}, offset_center: {offset_center}, steering: {steering}")
+            print(f"Step: {self.control_object.engine.episode_step}, offset_center: {offset_center} (sim: {current_car_center_offset}), steering: {steering}")
             if patch_object is not None and patch_object.input_image_sizes == tuple(reversed(image_size)):
                 im = np.array(patch_object.model_in).transpose((1, 2, 0))
                 im = (im * 255).astype(np.uint8)

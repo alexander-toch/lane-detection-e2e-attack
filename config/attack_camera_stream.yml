@@ -1,15 +1,18 @@
-seed: 1235
-num_scenarios: 1
-map_config: SCS
+seed: 1000
+num_scenarios: 20
+map_config: SSC
 headless_rendering: false
 save_images: false
-max_steps: 800
+max_steps: 500
 start_with_manual_control: false
+patch_geneneration_iterations: 500
+save_probmaps: false
+lane_detection_model: resa
 simulator_window_size:
 - 800
 - 288
 policy: LaneDetectionPolicyE2E
 attack_config:
-  attack_at_meter: -1
-  two_pass_attack: false
+  attack_at_meter: 60
+  two_pass_attack: true
   place_patch_in_image_stream: true

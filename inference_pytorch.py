@@ -38,9 +38,12 @@ class DirtyRoadPatch:
 class PyTorchPipeline:
     def __init__(self, model_path=ONNX_MODEL_PATH, targeted=False, patch_size=(120,300), patch_location=(200,160), max_iterations=50, model="resa"):
         
-        if model == "baseline":
+        if model == "resnet50":
             CONFIG=os.path.join(script_dir, 'attack/pytorch_auto_drive/configs/lane_detection/baseline/resnet50_culane.py').replace('\\','/')
             CHECKPOINT=os.path.join(script_dir, '../resnet50_baseline_culane_20210308.pt').replace('\\','/')
+        if model == "erfnet":
+            CONFIG=os.path.join(script_dir, 'attack/pytorch_auto_drive/configs/lane_detection/baseline/erfnet_culane.py').replace('\\','/')
+            CHECKPOINT=os.path.join(script_dir, '../erfnet_baseline_culane_20210204.pt').replace('\\','/')
         elif model == "resa":
             CONFIG=os.path.join(script_dir, 'attack/pytorch_auto_drive/configs/lane_detection/resa/resnet50_culane.py').replace('\\','/')
             CHECKPOINT=os.path.join(script_dir, '../resnet50_resa_culane_20211016.pt').replace('\\','/')
@@ -157,7 +160,7 @@ class PyTorchPipeline:
                 .numpy()
             )
 
-            # self.save_image(model_in[0], f'camera_observations/{control_object.engine.episode_step}_model_input.jpg')
+            # self.save_image(model_in[0], f'camera_observations/{control_object.engine.episode_step}_model_input.png')
             results = self.model(torch.from_numpy(model_in).to(self.device))
 
         keypoints = lane_as_segmentation_inference(
@@ -232,7 +235,7 @@ class PyTorchPipeline:
         x_2, y_2 = x_1 + patch.shape[2], y_1 + patch.shape[1]
         model_in[0][:, y_1:y_2, x_1:x_2] = torch.from_numpy(patch).to(model_in.device) if image_on_cuda else patch
 
-        # self.save_image(model_in[0].cpu().numpy(), f'camera_observations/{control_object.engine.episode_step}_model_input.jpg')
+        # self.save_image(model_in[0].cpu().numpy(), f'camera_observations/{control_object.engine.episode_step}_model_input.png')
 
         results = self.model(model_in) if image_on_cuda else self.model(torch.from_numpy(model_in).to(self.device))
 

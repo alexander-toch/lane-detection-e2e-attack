@@ -1,13 +1,13 @@
-seed: 1081
+seed: 1020
 num_scenarios: 20
 map_config: SSC
 headless_rendering: false
 save_images: false
 max_steps: 500
 start_with_manual_control: false
-patch_geneneration_iterations: 250
+patch_geneneration_iterations: 500
 save_probmaps: false
-lane_detection_model: scnn
+lane_detection_model: resnet50
 patch_size_meters:
 - 1.0
 - 1.0

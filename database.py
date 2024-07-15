@@ -28,6 +28,7 @@ class ExperimentDatabase:
                         "end_reason TEXT,"
                         "end_step INTEGER,"
                         "end_meter REAL,"
+                        "e2e_ld REAL,"
                         "FOREIGN KEY (experiment_id) REFERENCES experiment (id))"
         )
         self.cur.execute("CREATE TABLE IF NOT EXISTS simulation_step ("
@@ -36,6 +37,7 @@ class ExperimentDatabase:
                         "step INTEGER,"
                         "time TIMESTAMP,"
                         "offset_center REAL,"
+                        "offset_center_simulator REAL,"
                         "car_position_x_meter REAL,"
                         "steering REAL,"
                         "speed REAL,"
@@ -55,17 +57,19 @@ class ExperimentDatabase:
         self.conn.commit()
     
     def add_simulation(self, experiment_id, seed, map_config, max_steps, start_time, end_time, attack_active, 
-                       patch_geneneration_iterations, attack_at_meter, simulator_width, simulator_height, lane_detection_model, end_reason, end_step, end_meter):
-        self.cur.execute("INSERT INTO simulation VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                       patch_geneneration_iterations, attack_at_meter, simulator_width, simulator_height, 
+                       lane_detection_model, end_reason, end_step, end_meter, e2e_ld):
+        self.cur.execute("INSERT INTO simulation VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                             (experiment_id, seed, map_config, max_steps, start_time, end_time, attack_active, 
-                             patch_geneneration_iterations, attack_at_meter, simulator_width, simulator_height, lane_detection_model, end_reason, end_step, end_meter))
+                             patch_geneneration_iterations, attack_at_meter, simulator_width, simulator_height, 
+                             lane_detection_model, end_reason, end_step, end_meter, e2e_ld))
         self.conn.commit()
         return self.cur.lastrowid
     
     def add_simulation_steps(self, simulation_id, steps):
-        insert_tuples = [(simulation_id, step['step'], step['time'], step['offset_center'], 
+        insert_tuples = [(simulation_id, step['step'], step['time'], step['offset_center'], step['offset_center_simulator'], 
                           step['car_position_x_meter'], step['steering'], step['speed'], step['throttle_brake']) for step in steps]
-        self.cur.executemany('INSERT INTO simulation_step VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?)', insert_tuples)
+        self.cur.executemany('INSERT INTO simulation_step VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)', insert_tuples)
         self.conn.commit()
 
 
