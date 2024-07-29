@@ -1,4 +1,4 @@
-seed: 1000
+seed: 2000
 num_scenarios: 20
 map_config: SSC
 headless_rendering: false

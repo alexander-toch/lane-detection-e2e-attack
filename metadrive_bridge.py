@@ -4,7 +4,10 @@ import os
 import glob
 from enum import Enum
 from dataclasses import dataclass, field
+import queue
+import threading
 import cv2
+import numpy as np
 from metadrive import MetaDriveEnv
 from metadrive.component.sensors.rgb_camera import RGBCamera
 from metadrive.constants import TerminationState
@@ -17,6 +20,7 @@ from metadrive.component.pgblock.first_block import FirstPGBlock
 from metadrive_policy.TopDownCamera import TopDownCamera
 from metadrive_policy.lanedetection_policy_patch_e2e import LaneDetectionPolicyE2E
 from metadrive_policy.lanedetection_policy_dpatch import LaneDetectionPolicy
+from metadrive_policy.lane_camera import LaneCamera
 
 from database import ExperimentDatabase
 
@@ -44,6 +48,8 @@ class Settings:
     policy: str = "LaneDetectionPolicyE2E"
     attack_config: AttackConfig | None = field(default_factory=AttackConfig)
     lanes_per_direction: int = 2
+    use_lane_camera: bool = False
+    generate_training_data: bool = False
 
 class AttackType(str, Enum):
     none = 'None'
@@ -66,6 +72,10 @@ class MetaDriveBridge:
         }
 
         self.database = ExperimentDatabase("experiments.db")
+        self.io_tasks = queue.Queue()
+        self.stop_event = threading.Event()
+        self.io_thread = threading.Thread(target=self.io_worker, daemon=True)
+        self.io_thread.start()
 
         self.attack_type = AttackType.none
         if self.settings.attack_config is not None:
@@ -93,7 +103,6 @@ class MetaDriveBridge:
             window_size=self.settings.simulator_window_size,
             sensors={
                 "rgb_camera": (RGBCamera, self.settings.simulator_window_size[0], self.settings.simulator_window_size[1]),
-                # "topdown_camera": (TopDownCamera, self.settings.simulator_window_size[0], self.settings.simulator_window_size[1]),
             },
             vehicle_config={
                 "image_source": "rgb_camera",
@@ -126,14 +135,18 @@ class MetaDriveBridge:
             patch_geneneration_iterations=self.settings.patch_geneneration_iterations,
             patch_color_replace=self.settings.attack_config.patch_color_replace if self.settings.attack_config is not None else False,
             lane_detection_model=self.settings.lane_detection_model,
+            generate_training_data=self.settings.generate_training_data,
             decision_repeat=1,
             preload_models=False,
             manual_control=True,
             force_map_generation=True, # disables the PG Map cache
             show_fps=True,
             show_interface_navi_mark=False,
-            interface_panel=["dashboard", "rgb_camera", "topdown_camera"],
+            interface_panel=["dashboard", "rgb_camera", "lane_camera"],
         )
+
+        if self.settings.use_lane_camera:
+            self.config["sensors"]["lane_camera"] = (LaneCamera, self.settings.simulator_window_size[0], self.settings.simulator_window_size[1])
 
     def cleanup(self):
         # delete all the previous camera observations
@@ -231,21 +244,35 @@ class MetaDriveBridge:
 
                 if self.settings.save_images:
                     if step_index % 20 == 0:
-                        cv2.imwrite(
-                            f"camera_observations/{str(step_index)}.jpg",
+                        self.io_tasks.put(lambda: cv2.imwrite(
+                            f"camera_observations/{str(step_index)}.png",
                             (
                                 o["image"].get()[..., -1]
                                 if env.config["image_on_cuda"]
                                 else o["image"][..., -1]
                             )
                             * 255,
-                        )
+                        ))
+                        if self.settings.use_lane_camera:
+                            self.io_tasks.put(lambda: cv2.imwrite(
+                                f"camera_observations/{str(step_index)}_label.png",
+                                (
+                                    o["lane"].get()[..., -1]
+                                    if env.config["image_on_cuda"]
+                                    else o["lane"][..., -1]
+                                )
+                                * 255,
+                            ))
 
                 policy = env.engine.get_policy(env.agent.name)
                 current_car_pos_meter = env.agent.position[0]
 
                 # Used for calculation of E2E-LD metric
-                offsets_center_simulator.append(abs(policy.step_infos[-1]["offset_center_simulator"]))
+                if "step_infos" in policy.__dict__ and len(policy.step_infos) > 0:
+                    offsets_center_simulator.append(abs(policy.step_infos[-1]["offset_center_simulator"]))
+
+                    if self.settings.use_lane_camera and self.settings.generate_training_data:
+                        self.save_training_data(step_index, env.current_seed, policy.step_infos[-1], o)
 
                 if tm or tc or step_index >= self.settings.max_steps: 
                     end_reason = self.get_end_reason(info, step_index, policy.step_infos)
@@ -302,3 +329,44 @@ class MetaDriveBridge:
                 break
             
             step_index += 1
+
+    def io_worker(self):
+        while not self.stop_event.isSet():
+            try:
+                task = self.io_tasks.get(block=True, timeout=1)
+                task()
+                self.io_tasks.task_done()
+            except queue.Empty:
+                pass
+
+    def save_training_data(self, step_index, seed, step_info, observation):
+        if "model_input" not in step_info or "lane" not in observation:
+            print("Missing model input or lane observation. Skipping training data generation.")
+            return
+        
+        # create subfolder for each seed
+        folder = f"./camera_observations/training_data/seed_{seed}"
+        if not os.path.exists(folder):
+            os.makedirs(folder)
+
+        height = step_info["model_input"].shape[1]
+        width = step_info["model_input"].shape[2]
+        
+        # save model input
+        self.io_tasks.put(lambda: self.save_image(step_info["model_input"], f"{folder}/{step_index}.png", (height, width)))
+
+        # save lane detection output
+        label = (observation["lane"].get()[..., -1] if self.config["image_on_cuda"] else observation["lane"][..., -1]) * 255
+        # resize label to match model input if necessary
+        if label.shape[0] != height or label.shape[1] != width:
+            label = cv2.resize(label, (width, height))
+
+        self.io_tasks.put(lambda: cv2.imwrite(f"{folder}/{step_index}_label.png", label))
+
+    def save_image(self, image, path, sizes):
+        image = image.transpose((1, 2, 0))
+        image = np.clip(image, 0, 1)
+        image = (image * 255).astype(np.uint8)
+        image = cv2.resize(image, (sizes[1], sizes[0]))
+        # image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+        cv2.imwrite(path, image)

@@ -1,11 +1,11 @@
-seed: 1000
+seed: 2000
 num_scenarios: 20
 map_config: SSC
 headless_rendering: false
 save_images: false
-max_steps: 500
+max_steps: 300
 start_with_manual_control: false
-patch_geneneration_iterations: 500
+patch_geneneration_iterations: 250
 save_probmaps: false
 lane_detection_model: scnn
 simulator_window_size:
@@ -13,6 +13,6 @@ simulator_window_size:
 - 288
 policy: LaneDetectionPolicyE2E
 attack_config:
-  attack_at_meter: 60
+  attack_at_meter: 30
   two_pass_attack: true
   place_patch_in_image_stream: true

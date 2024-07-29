@@ -12,13 +12,14 @@ import sys, os
 import torch
 
 from metadrive_policy.lanedetection_policy_dpatch import LaneDetectionPolicy
+from metadrive.obs.image_obs import ImageObservation
 
 sys.path.append(os.path.dirname(os.getcwd()))
 from inference_pytorch import PyTorchPipeline
 from lanefitting import draw_lane, draw_lane_bev, get_ipm_via_camera_config
 
 TARGET=np.load("attack/targets/right_new.npy", allow_pickle=True).item()
-REGENERATE_INTERVAL = 150
+REGENERATE_INTERVAL = 1000
 
 class LaneDetectionPolicyE2E(LaneDetectionPolicy):
     NORMAL_SPEED = 100  # km/h
@@ -90,14 +91,12 @@ class LaneDetectionPolicyE2E(LaneDetectionPolicy):
         # get RGB camera image from vehicle
         observation = self.camera_observation.observe(self.control_object)
 
-        # top down camera (# 10 in driving direction, 50 height, yaw -90 degree)
-        # observation = self.camera_observation.observe(self.control_object, position=(0., 10., 50.), hpr=(0., -90.0, 0.0)) 
-
 
         image_on_cuda = get_global_config()["image_on_cuda"]
         attack_at_meter = get_global_config()["dirty_road_patch_attack_at_meter"]
         attack_active = get_global_config()["enable_dirty_road_patch_attack"]
         place_patch_in_image_stream = get_global_config()["place_patch_in_image_stream"]
+        generate_training_data = get_global_config()["generate_training_data"]
 
         if not image_on_cuda:
             image = Image.fromarray((observation["image"][..., -1] * 255).astype(np.uint8))
@@ -127,29 +126,33 @@ class LaneDetectionPolicyE2E(LaneDetectionPolicy):
 
         if (not place_patch_in_image_stream and int(current_car_pos_meter) == attack_at_meter and self.control_object.engine.dirty_road_patch_object is None) or \
             (place_patch_in_image_stream and attack_active and int(current_car_pos_meter) >= attack_at_meter):
-            regenerate_patch = True if get_global_config()["place_patch_in_image_stream"] is True and self.control_object.engine.episode_step % REGENERATE_INTERVAL == 0 else False
-            offset_center, _, _, patch_object = (
-                self.pipeline.infer_offset_center_with_dpatch(image, (image_size[1], image_size[0]), self.control_object, regenerate_patch, target=self.target, image_on_cuda=image_on_cuda) # important: swap image_size order
+            regenerate_patch = True if place_patch_in_image_stream and self.control_object.engine.episode_step % REGENERATE_INTERVAL == 0 else False
+            offset_center, _, keypoints, patch_object = (
+                self.pipeline.infer_offset_center_with_dpatch(image, (image_size[1], image_size[0]), self.control_object, regenerate_patch, target=self.target, image_on_cuda=image_on_cuda, optimize_runtime=place_patch_in_image_stream) # important: swap image_size order
             )
-            debug_info = {
-                'probmaps': patch_object.probmaps,
-            }
+                
+            debug_info = {}
+            if not place_patch_in_image_stream:
+                debug_info = {
+                    'probmaps': patch_object.probmaps,
+                }
 
-            self.control_object.engine.dirty_road_patch_object = patch_object
+           
+                self.control_object.engine.dirty_road_patch_object = patch_object
 
-            self.io_tasks.put(lambda: self.pipeline.save_image(
-                    patch_object.model_in,
-                    f"camera_observations/patched_input_{str(self.control_object.engine.episode_step)}.png",
+                self.io_tasks.put(lambda: self.pipeline.save_image(
+                        patch_object.model_in,
+                        f"camera_observations/patched_input_{str(self.control_object.engine.episode_step)}.png",
+                    )
                 )
-            )
 
-            im, im_softmax = self.get_probmap_images(patch_object.probmaps, image_size)
-            plt.imsave(f"camera_observations/patched_probmap_{str(self.control_object.engine.episode_step)}_merged.png", im, cmap='seismic')
-            plt.imsave(f"camera_observations/patched_softmax_probmap_{str(self.control_object.engine.episode_step)}_merged.png", im_softmax, cmap='seismic')
+                im, im_softmax = self.get_probmap_images(patch_object.probmaps, image_size)
+                plt.imsave(f"camera_observations/patched_probmap_{str(self.control_object.engine.episode_step)}_merged.png", im, cmap='seismic')
+                plt.imsave(f"camera_observations/patched_softmax_probmap_{str(self.control_object.engine.episode_step)}_merged.png", im_softmax, cmap='seismic')
 
-            if not get_global_config()["place_patch_in_image_stream"]:
+            if not place_patch_in_image_stream:
                 offset_center, _, keypoints, debug_info = (
-                    self.pipeline.infer_offset_center(image, (image_size[1], image_size[0]), self.control_object, image_on_cuda, self.ipm) # important: swap image_size order
+                    self.pipeline.infer_offset_center(image, (image_size[1], image_size[0]), self.control_object, image_on_cuda, self.ipm, return_model_input=generate_training_data) # important: swap image_size order
                 )
         else: 
             if attack_active and get_global_config()["patch_color_replace"]:
@@ -174,7 +177,7 @@ class LaneDetectionPolicyE2E(LaneDetectionPolicy):
 
 
             offset_center, _, keypoints, debug_info = (
-                self.pipeline.infer_offset_center(image, (image_size[1], image_size[0]), self.control_object, image_on_cuda, self.ipm) # important: swap image_size order
+                self.pipeline.infer_offset_center(image, (image_size[1], image_size[0]), self.control_object, image_on_cuda, self.ipm, return_model_input=generate_training_data) # important: swap image_size order
             )
 
 
@@ -207,6 +210,7 @@ class LaneDetectionPolicyE2E(LaneDetectionPolicy):
             "steering": steering,
             "speed": self.control_object.speed_km_h,
             "throttle_brake": self.control_object.throttle_brake,
+            "model_input": debug_info["model_input"] if "model_input" in debug_info else None,
         })
 
         # TODO: add a flag to enable image saving and interval

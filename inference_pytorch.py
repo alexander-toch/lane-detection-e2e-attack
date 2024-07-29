@@ -54,6 +54,7 @@ class PyTorchPipeline:
         self.cfg = read_config(CONFIG) 
         self.model = MODELS.from_dict(self.cfg['model'])
         self.current_patch = None
+        self.current_patch_cuda = None
 
         if not torch.cuda.is_available():
             self.device = torch.device("cpu")
@@ -133,7 +134,7 @@ class PyTorchPipeline:
         )
         return results, keypoints
 
-    def infer_offset_center(self, image, orig_sizes, control_object, image_on_cuda=False, ipm=None):
+    def infer_offset_center(self, image, orig_sizes, control_object, image_on_cuda=False, ipm=None, return_model_input=False):
         if image_on_cuda:
             # image arrives in (H, W, C), needs to have [C, H, W] format
             image = torch.as_tensor(image, device='cuda').permute(2, 0, 1)
@@ -182,6 +183,8 @@ class PyTorchPipeline:
         debug_info = {
             'probmaps': results,
         }
+        if return_model_input:
+            debug_info['model_input'] = model_in[0].cpu().numpy() if image_on_cuda else model_in[0]
 
         return off_center, lane_heading_theta, keypoints[0], debug_info
     
@@ -193,7 +196,7 @@ class PyTorchPipeline:
         # image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
         cv2.imwrite(path, image)
     
-    def infer_offset_center_with_dpatch(self, image, orig_sizes, control_object, generate_patch=True, target=None, image_on_cuda=False, ipm=None):
+    def infer_offset_center_with_dpatch(self, image, orig_sizes, control_object, generate_patch=True, target=None, image_on_cuda=False, ipm=None, optimize_runtime=False, return_model_input=False):
         if self.targeted and target is None:
             raise ValueError("Targeted attack requires a target!")
         
@@ -226,6 +229,9 @@ class PyTorchPipeline:
                 self.current_patch = self.attack.generate(x=model_in.cpu().numpy() if image_on_cuda else model_in.copy(), y=target)[0]
             else:
                 self.current_patch = self.attack.generate(x=model_in.cpu().numpy() if image_on_cuda else model_in.copy())[0]
+            
+            if image_on_cuda:
+                self.current_patch_cuda = torch.from_numpy(self.current_patch).to(self.device)
             self.save_image(self.current_patch, f'camera_observations/patch_{control_object.engine.episode_step}.png', sizes=(self.current_patch.shape[1], self.current_patch.shape[2]))
         
         patch = self.current_patch
@@ -233,7 +239,7 @@ class PyTorchPipeline:
         # place patch
         x_1, y_1 = self.patch_location
         x_2, y_2 = x_1 + patch.shape[2], y_1 + patch.shape[1]
-        model_in[0][:, y_1:y_2, x_1:x_2] = torch.from_numpy(patch).to(model_in.device) if image_on_cuda else patch
+        model_in[0][:, y_1:y_2, x_1:x_2] = self.current_patch_cuda if image_on_cuda else patch
 
         # self.save_image(model_in[0].cpu().numpy(), f'camera_observations/{control_object.engine.episode_step}_model_input.png')
 
@@ -255,6 +261,9 @@ class PyTorchPipeline:
             keypoints[0], (orig_sizes[1], orig_sizes[0]), ipm
         )
 
+        if optimize_runtime:
+            return off_center, lane_heading_theta, keypoints[0], None
+
         # scale patch to match orig_sizes proportionally
         scale_factor_height = orig_sizes[0]/input_sizes[0]
         scale_factor_width = orig_sizes[1]/input_sizes[1]
@@ -268,7 +277,7 @@ class PyTorchPipeline:
 
         scaled_location = (int(self.patch_location[0] * scale_factor_width), int(self.patch_location[1] * scale_factor_height)) # format (x, y)
         patch_object: DirtyRoadPatch = DirtyRoadPatch(
-            model_in[0].cpu().numpy(),
+            model_in[0].cpu().numpy() if image_on_cuda else model_in[0],
             patch, 
             scaled_location, 
             results,
