@@ -203,7 +203,7 @@ class MetaDriveBridge:
 
     def get_end_reason(self, info, step_index, steps):
         if info[TerminationState.SUCCESS] or info[TerminationState.MAX_STEP] or step_index >= self.settings.max_steps:
-            last_steps_to_check = 20 if len(steps) > 10 else int(len(steps) / 10)
+            last_steps_to_check = 20 if len(steps) > 10 else max(int(len(steps) / 10), 1)
             if len(list(filter(lambda x: x["offset_center"] is None, steps[-last_steps_to_check:]))) / last_steps_to_check >= 0.5:
                 return "NO_LANES_DETECTED"
             return "SUCCESS"
