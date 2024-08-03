@@ -118,3 +118,4 @@ camera_observations/archive/*
 drive.gif
 *probmap.gif
 camera_observations/training_data/
+experiments.db
