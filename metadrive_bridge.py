@@ -8,10 +8,10 @@ import queue
 import threading
 import cv2
 import numpy as np
-from metadrive import MetaDriveEnv
+from metadrive import MetaDriveEnv, constants
 from metadrive.component.sensors.rgb_camera import RGBCamera
 from metadrive.constants import TerminationState
-from metadrive.constants import HELP_MESSAGE
+from metadrive.constants import HELP_MESSAGE, MetaDriveType
 from metadrive.component.map.base_map import BaseMap
 from metadrive.component.sensors.base_camera import _cuda_enable
 from metadrive.component.map.pg_map import MapGenerateMethod
@@ -21,6 +21,8 @@ from metadrive_policy.TopDownCamera import TopDownCamera
 from metadrive_policy.lanedetection_policy_patch_e2e import LaneDetectionPolicyE2E
 from metadrive_policy.lanedetection_policy_dpatch import LaneDetectionPolicy
 from metadrive_policy.lane_camera import LaneCamera
+
+from panda3d.core import Point2, Point3
 
 from database import ExperimentDatabase
 
@@ -228,6 +230,10 @@ class MetaDriveBridge:
         start_time = datetime.datetime.now()
         step_index = 0
         offsets_center_simulator = []
+
+        # TODO: only get lanes if training data is generated
+        all_lanes = list(filter(lambda x:  MetaDriveType.is_road_line(x["type"]) or MetaDriveType.is_road_boundary_line(x["type"]), env.engine.current_map.get_map_features(1).values()))
+
         while True:
             try:
                 o, r, tm, tc, info = env.step([0,0])
@@ -266,6 +272,9 @@ class MetaDriveBridge:
 
                 policy = env.engine.get_policy(env.agent.name)
                 current_car_pos_meter = env.agent.position[0]
+
+                if True or self.settings.generate_training_data:
+                    lane_coords = self.get_lane_coordinates_in_image(all_lanes, env, step_index)
 
                 # Used for calculation of E2E-LD metric
                 if "step_infos" in policy.__dict__ and len(policy.step_infos) > 0:
@@ -370,3 +379,35 @@ class MetaDriveBridge:
         image = cv2.resize(image, (sizes[1], sizes[0]))
         # image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
         cv2.imwrite(path, image)
+
+    def get_lane_coordinates_in_image(self, all_lanes, env, step_index):
+        cam = env.engine.get_sensor("rgb_camera").get_cam()
+        lens = env.engine.get_sensor("rgb_camera").get_lens()
+        # Get the image dimensions
+        image_width = env.engine.win.getXSize()
+        image_height = env.engine.win.getYSize()
+
+        # Transform lane coordinates
+        lane_coordinates_in_image = []
+        for lane in all_lanes:
+            lane_points = list(filter(lambda x: x[0] >= env.agent.position[0] and x[0] < env.agent.position[0] + 200, lane["polyline"]))
+            if not len(lane_points):
+                continue
+
+            for point in lane_points:
+                projected_point = Point2()
+                if lens.project(cam.getRelativePoint(env.engine.render, Point3(point[0], point[1], 0)), projected_point):
+                    # Map the projected point into clip space (image center is (0, 0))
+                    p_image = [
+                        (projected_point[0] * (image_width / 2)) + (image_width / 2),  # X coordinate: scale and shift
+                        (image_height / 2) - (projected_point[1] * (image_height / 2))  # Y coordinate: scale and shift (flip Y axis)
+                    ]
+                    lane_coordinates_in_image.append(p_image)
+
+        # save image with lane coordinates as white dots
+        image = np.zeros((env.engine.win.getYSize(), env.engine.win.getXSize(), 3), dtype=np.uint8)
+        for point in lane_coordinates_in_image:
+            cv2.circle(image, (int(point[0]), int(point[1])), 1, (255, 255, 255), -1)
+        self.io_tasks.put(lambda: cv2.imwrite(f"camera_observations/{step_index}_lanes.png", image))
+
+        return lane_coordinates_in_image

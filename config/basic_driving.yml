@@ -10,4 +10,4 @@ simulator_window_size:
 - 720
 policy: LaneDetectionPolicyE2E
 attack_config: null
-use_lane_camera: true
+use_lane_camera: false
