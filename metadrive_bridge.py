@@ -232,7 +232,7 @@ class MetaDriveBridge:
         offsets_center_simulator = []
 
         # TODO: only get lanes if training data is generated
-        all_lanes = list(filter(lambda x:  MetaDriveType.is_road_line(x["type"]) or MetaDriveType.is_road_boundary_line(x["type"]), env.engine.current_map.get_map_features(1).values()))
+        lanes = self.get_lanes_from_navigation_map(env)
 
         while True:
             try:
@@ -274,7 +274,7 @@ class MetaDriveBridge:
                 current_car_pos_meter = env.agent.position[0]
 
                 if True or self.settings.generate_training_data:
-                    lane_coords = self.get_lane_coordinates_in_image(all_lanes, env, step_index)
+                    lane_coords = self.get_lane_coordinates_in_image(lanes, env, step_index)
 
                 # Used for calculation of E2E-LD metric
                 if "step_infos" in policy.__dict__ and len(policy.step_infos) > 0:
@@ -380,7 +380,26 @@ class MetaDriveBridge:
         # image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
         cv2.imwrite(path, image)
 
-    def get_lane_coordinates_in_image(self, all_lanes, env, step_index):
+    def get_lanes_from_navigation_map(self, env):
+        all_lanes = list(filter(lambda x:  MetaDriveType.is_road_line(x["type"]) or MetaDriveType.is_road_boundary_line(x["type"]), 
+                                env.engine.current_map.get_map_features(1).values()))
+        checkpoints = env.agent.navigation.checkpoints
+
+        final_lanes = [[] for _ in range(self.settings.lanes_per_direction * 2 + 1)] # i.e. 5 lane lines in total including the middle line
+
+        for cid, checkpoint in enumerate(checkpoints):
+            for lane in all_lanes:
+                is_white = not MetaDriveType.is_yellow_line(lane["type"])
+                is_broken = MetaDriveType.is_broken_line(lane["type"])
+                idx = 1 if is_broken else 0 if is_white else -1
+                if lane["index"][0] == checkpoint and lane["index"][1] == checkpoints[cid + 1]:
+                    final_lanes[idx].extend(lane['polyline'])
+                # lanes in negative direction
+                elif lane['index'][1] == f"-{checkpoint}" and lane['index'][0] == f"-{checkpoints[cid + 1]}":
+                    final_lanes[self.settings.lanes_per_direction + idx if is_white else -1].extend(lane['polyline'])
+        return final_lanes
+
+    def get_lane_coordinates_in_image(self, lanes, env, step_index):
         cam = env.engine.get_sensor("rgb_camera").get_cam()
         lens = env.engine.get_sensor("rgb_camera").get_lens()
         # Get the image dimensions
@@ -388,9 +407,18 @@ class MetaDriveBridge:
         image_height = env.engine.win.getYSize()
 
         # Transform lane coordinates
-        lane_coordinates_in_image = []
-        for lane in all_lanes:
-            lane_points = list(filter(lambda x: x[0] >= env.agent.position[0] and x[0] < env.agent.position[0] + 200, lane["polyline"]))
+        lane_coordinates = [[] for _ in range(len(lanes))]
+
+        # assign each lane a different color
+        lane_color = [(255, 255, 255), (255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0)] # TODO: add more colors if necessary
+        image = np.zeros((env.engine.win.getYSize(), env.engine.win.getXSize(), 3), dtype=np.uint8)
+        pos_meter = env.agent.position[0]
+
+        # only consider 35 points in front of the car
+        lanes_filtered = map(lambda lane: 
+                            list(filter(lambda x: x[0] >= pos_meter, lane))[:35], lanes)
+
+        for i, lane_points in enumerate(lanes_filtered):
             if not len(lane_points):
                 continue
 
@@ -402,12 +430,9 @@ class MetaDriveBridge:
                         (projected_point[0] * (image_width / 2)) + (image_width / 2),  # X coordinate: scale and shift
                         (image_height / 2) - (projected_point[1] * (image_height / 2))  # Y coordinate: scale and shift (flip Y axis)
                     ]
-                    lane_coordinates_in_image.append(p_image)
+                    lane_coordinates[i].extend(p_image)
+                    cv2.circle(image, (int(p_image[0]), int(p_image[1])), 1, lane_color[i], -1)
 
-        # save image with lane coordinates as white dots
-        image = np.zeros((env.engine.win.getYSize(), env.engine.win.getXSize(), 3), dtype=np.uint8)
-        for point in lane_coordinates_in_image:
-            cv2.circle(image, (int(point[0]), int(point[1])), 1, (255, 255, 255), -1)
         self.io_tasks.put(lambda: cv2.imwrite(f"camera_observations/{step_index}_lanes.png", image))
 
-        return lane_coordinates_in_image
+        return lane_coordinates
