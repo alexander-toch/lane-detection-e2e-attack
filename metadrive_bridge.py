@@ -397,9 +397,13 @@ class MetaDriveBridge:
                 # lanes in negative direction
                 elif lane['index'][1] == f"-{checkpoint}" and lane['index'][0] == f"-{checkpoints[cid + 1]}":
                     final_lanes[self.settings.lanes_per_direction + idx if is_white else -1].extend(lane['polyline'])
+
+        # sort by x coordinate (meters from bottom)
+        final_lanes = list(map(lambda lane: sorted(lane, key=lambda x: x[0]), final_lanes))
         return final_lanes
 
     def get_lane_coordinates_in_image(self, lanes, env, step_index):
+        DEBUG = True
         cam = env.engine.get_sensor("rgb_camera").get_cam()
         lens = env.engine.get_sensor("rgb_camera").get_lens()
         # Get the image dimensions
@@ -409,14 +413,14 @@ class MetaDriveBridge:
         # Transform lane coordinates
         lane_coordinates = [[] for _ in range(len(lanes))]
 
-        # assign each lane a different color
-        lane_color = [(255, 255, 255), (255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0)] # TODO: add more colors if necessary
-        image = np.zeros((env.engine.win.getYSize(), env.engine.win.getXSize(), 3), dtype=np.uint8)
+        # assign each lane a different color in a uint8 grayscale image
+        image = np.zeros((env.engine.win.getYSize(), env.engine.win.getXSize(), 1 if not DEBUG else 3), dtype=np.uint8)
         pos_meter = env.agent.position[0]
 
-        # only consider 35 points in front of the car
+        # only consider points near the car
+        lane_color_debug = [(255, 255, 255), (255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0)] # TODO: add more colors if necessary
         lanes_filtered = map(lambda lane: 
-                            list(filter(lambda x: x[0] >= pos_meter, lane))[:35], lanes)
+                            list(filter(lambda x: x[0] >= pos_meter - 2, lane))[:100], lanes)
 
         for i, lane_points in enumerate(lanes_filtered):
             if not len(lane_points):
@@ -431,7 +435,11 @@ class MetaDriveBridge:
                         (image_height / 2) - (projected_point[1] * (image_height / 2))  # Y coordinate: scale and shift (flip Y axis)
                     ]
                     lane_coordinates[i].extend(p_image)
-                    cv2.circle(image, (int(p_image[0]), int(p_image[1])), 1, lane_color[i], -1)
+                    # cv2.circle(image, (int(p_image[0]), int(p_image[1])), 1, i+1, -1)
+
+        for i, l in enumerate(lane_coordinates):
+            if len(l):
+                cv2.polylines(image, [np.array(l).reshape((-1, 1, 2)).astype(np.int32)], False, i+1 if not DEBUG else lane_color_debug[i], 16 if not DEBUG else 2)
 
         self.io_tasks.put(lambda: cv2.imwrite(f"camera_observations/{step_index}_lanes.png", image))
 
