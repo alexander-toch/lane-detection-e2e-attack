@@ -47,7 +47,7 @@ pip install -e .
 cd ../lane-detection-e2e-attack
 python -m pip install --upgrade pywin32
 pip3 install jsonargparse torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
-pip install panda3d metadrive-simulator opencv-python numpy pillow torch torchvision adversarial-robustness-toolbox[pytorch_image] timm mmcv tensorboard importmagician cupy-cuda12x 
+pip install panda3d fcntl metadrive-simulator opencv-python numpy pillow torch torchvision adversarial-robustness-toolbox[pytorch_image] timm mmcv tensorboard importmagician cupy-cuda12x 
 pip install cuda-python PyOpenGL PyOpenGL_accelerate
 ```
 

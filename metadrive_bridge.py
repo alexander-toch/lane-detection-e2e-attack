@@ -1,11 +1,13 @@
 
 import datetime
 import os
+import shutil
 import glob
 from enum import Enum
 from dataclasses import dataclass, field
 import queue
 import threading
+import functools
 import cv2
 import numpy as np
 from metadrive import MetaDriveEnv, constants
@@ -51,7 +53,9 @@ class Settings:
     attack_config: AttackConfig | None = field(default_factory=AttackConfig)
     lanes_per_direction: int = 2
     use_lane_camera: bool = False
+    debug_lane_labels: bool = False
     generate_training_data: bool = False
+    generate_training_data_interval: int = 10
 
 class AttackType(str, Enum):
     none = 'None'
@@ -97,6 +101,7 @@ class MetaDriveBridge:
                     self.attack_type = AttackType.onePassSimple
 
         self.experiment_id = self.database.add_experiment(datetime.datetime.now(), None, self.attack_type, self.settings.num_scenarios)
+        self.train_ground_truth = []
 
         self.policy = LaneDetectionPolicyE2E if self.settings.policy == "LaneDetectionPolicyE2E" else LaneDetectionPolicy
 
@@ -175,6 +180,7 @@ class MetaDriveBridge:
             self.run_simulation(env)
 
         self.database.finish_experiment(self.experiment_id, datetime.datetime.now())
+        self.process_training_data()
 
     def run_two_pass_attack(self):
         self.cleanup()
@@ -219,7 +225,7 @@ class MetaDriveBridge:
             return "UNKNOWN"
 
     def run_simulation(self, env: MetaDriveEnv):
-
+        self.train_ground_truth = []
         env.reset(env.start_seed)
         env.current_track_agent.expert_takeover = not self.settings.start_with_manual_control
         
@@ -232,7 +238,11 @@ class MetaDriveBridge:
         offsets_center_simulator = []
 
         # TODO: only get lanes if training data is generated
-        lanes = self.get_lanes_from_navigation_map(env)
+        if self.settings.generate_training_data:
+            folder = f"./camera_observations/training_data/seed_{env.current_seed}"
+            if not os.path.exists(folder):
+                os.makedirs(folder)
+            lanes = self.get_lanes_from_navigation_map(env)
 
         while True:
             try:
@@ -273,18 +283,18 @@ class MetaDriveBridge:
                 policy = env.engine.get_policy(env.agent.name)
                 current_car_pos_meter = env.agent.position[0]
 
-                if True or self.settings.generate_training_data:
-                    lane_coords = self.get_lane_coordinates_in_image(lanes, env, step_index)
+                if self.settings.generate_training_data and step_index % self.settings.generate_training_data_interval == 0: 
+                    self.generate_training_label(lanes, env, step_index, o)
 
                 # Used for calculation of E2E-LD metric
                 if "step_infos" in policy.__dict__ and len(policy.step_infos) > 0:
                     offsets_center_simulator.append(abs(policy.step_infos[-1]["offset_center_simulator"]))
 
-                    if self.settings.use_lane_camera and self.settings.generate_training_data:
-                        self.save_training_data(step_index, env.current_seed, policy.step_infos[-1], o)
-
                 if tm or tc or step_index >= self.settings.max_steps: 
                     end_reason = self.get_end_reason(info, step_index, policy.step_infos)
+                    if self.settings.generate_training_data and len(self.train_ground_truth) > 0:
+                        with open(f"{folder}/{env.current_seed}.txt", "w") as f:
+                            f.write("\n".join(self.train_ground_truth))
                 
                     print(f"Simulation with seed {env.current_seed} ended at step {step_index} with reason: {end_reason}. Attack active: {env.engine.global_config['enable_dirty_road_patch_attack']}")
                     sim_id = self.database.add_simulation(self.experiment_id, 
@@ -315,6 +325,9 @@ class MetaDriveBridge:
             except KeyboardInterrupt as e:
                 raise e
             except Exception:
+                if self.settings.generate_training_data and len(self.train_ground_truth) > 0:
+                        with open(f"{folder}/{env.current_seed}.txt", "w") as f:
+                            f.write("\n".join(self.train_ground_truth))
                 sim_id = self.database.add_simulation(self.experiment_id, 
                     env.current_seed, 
                     self.settings.map_config, 
@@ -347,30 +360,41 @@ class MetaDriveBridge:
                 self.io_tasks.task_done()
             except queue.Empty:
                 pass
+    
+    def process_training_data(self):
+        data_root = "./camera_observations/training_data"
+        root = f"{data_root}/culane"
+        labels_root = f"{root}/laneseg_label_w16"
+        list_root = f"{root}/lists"
+        if not os.path.exists(root):
+            os.makedirs(root)
+            os.makedirs(labels_root)
+            os.makedirs(list_root)
 
-    def save_training_data(self, step_index, seed, step_info, observation):
-        if "model_input" not in step_info or "lane" not in observation:
-            print("Missing model input or lane observation. Skipping training data generation.")
-            return
+        train = []
+
+        for gt in glob.glob("./camera_observations/training_data/seed_*/*.txt"):
+            seed = gt.replace("\\", "/").split("/")[-1].split(".")[0]
+
+            if not os.path.exists(f"{root}/{seed}"):
+                os.makedirs(f"{root}/{seed}")
+            if not os.path.exists(f"{labels_root}/{seed}"):
+                os.makedirs(f"{labels_root}/{seed}")
+
+            with open(gt, "r") as f:
+                lines = f.readlines()
+                for line in lines:
+                    cam_path, lane_path, *lanes_existence = line.strip().split(" ")
+                    step = f"{cam_path.split('/')[-1].split('_')[0]}.png"
+                    shutil.copyfile(f"{data_root}/{cam_path}", f"{root}/{seed}/{step}.png")
+                    shutil.copyfile(f"{data_root}/{lane_path}", f"{labels_root}/{seed}/{step}.png")
+                    train.append(f"{seed}/{step} {' '.join(lanes_existence)}")
+
+        with open(f"{list_root}/train.txt", "w") as f:
+            f.write("\n".join(train))
         
-        # create subfolder for each seed
-        folder = f"./camera_observations/training_data/seed_{seed}"
-        if not os.path.exists(folder):
-            os.makedirs(folder)
+        print("Training data processed.")
 
-        height = step_info["model_input"].shape[1]
-        width = step_info["model_input"].shape[2]
-        
-        # save model input
-        self.io_tasks.put(lambda: self.save_image(step_info["model_input"], f"{folder}/{step_index}.png", (height, width)))
-
-        # save lane detection output
-        label = (observation["lane"].get()[..., -1] if self.config["image_on_cuda"] else observation["lane"][..., -1]) * 255
-        # resize label to match model input if necessary
-        if label.shape[0] != height or label.shape[1] != width:
-            label = cv2.resize(label, (width, height))
-
-        self.io_tasks.put(lambda: cv2.imwrite(f"{folder}/{step_index}_label.png", label))
 
     def save_image(self, image, path, sizes):
         image = image.transpose((1, 2, 0))
@@ -396,14 +420,19 @@ class MetaDriveBridge:
                     final_lanes[idx].extend(lane['polyline'])
                 # lanes in negative direction
                 elif lane['index'][1] == f"-{checkpoint}" and lane['index'][0] == f"-{checkpoints[cid + 1]}":
-                    final_lanes[self.settings.lanes_per_direction + idx if is_white else -1].extend(lane['polyline'])
+                    if is_broken: # skip the left border line
+                        final_lanes[self.settings.lanes_per_direction + idx if is_white else -1].extend(lane['polyline'])
 
-        # sort by x coordinate (meters from bottom)
+        # sort points by x coordinate (meters from bottom)
         final_lanes = list(map(lambda lane: sorted(lane, key=lambda x: x[0]), final_lanes))
+
+        # filter out zer length lanes
+        final_lanes = list(filter(lambda lane: len(lane) > 1, final_lanes))
+
         return final_lanes
 
-    def get_lane_coordinates_in_image(self, lanes, env, step_index):
-        DEBUG = True
+    def generate_training_label(self, lanes, env, step_index, observation):
+        debug = self.settings.debug_lane_labels
         cam = env.engine.get_sensor("rgb_camera").get_cam()
         lens = env.engine.get_sensor("rgb_camera").get_lens()
         # Get the image dimensions
@@ -414,13 +443,13 @@ class MetaDriveBridge:
         lane_coordinates = [[] for _ in range(len(lanes))]
 
         # assign each lane a different color in a uint8 grayscale image
-        image = np.zeros((env.engine.win.getYSize(), env.engine.win.getXSize(), 1 if not DEBUG else 3), dtype=np.uint8)
+        image = np.zeros((env.engine.win.getYSize(), env.engine.win.getXSize(), 1 if not debug else 3), dtype=np.uint8)
         pos_meter = env.agent.position[0]
 
         # only consider points near the car
-        lane_color_debug = [(255, 255, 255), (255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0)] # TODO: add more colors if necessary
+        lane_color_debug = [(0, 255, 0), (0, 0, 255), (255, 0, 0), (255, 255, 0)] # TODO: add more colors if necessary
         lanes_filtered = map(lambda lane: 
-                            list(filter(lambda x: x[0] >= pos_meter - 2, lane))[:100], lanes)
+                            list(filter(lambda x: x[0] >= pos_meter - 20, lane))[:120], lanes)
 
         for i, lane_points in enumerate(lanes_filtered):
             if not len(lane_points):
@@ -435,12 +464,26 @@ class MetaDriveBridge:
                         (image_height / 2) - (projected_point[1] * (image_height / 2))  # Y coordinate: scale and shift (flip Y axis)
                     ]
                     lane_coordinates[i].extend(p_image)
-                    # cv2.circle(image, (int(p_image[0]), int(p_image[1])), 1, i+1, -1)
+
+        # sort by mean x coordinate
+        folder = f"./camera_observations/training_data/seed_{env.current_seed}"
+        existence = ["1" if len(l) > 1 else "0" for l in lane_coordinates]
+        self.train_ground_truth.append(f"seed_{env.current_seed}/{step_index}.png seed_{env.current_seed}/{step_index}_lanes.png {' '.join(existence)}")
 
         for i, l in enumerate(lane_coordinates):
-            if len(l):
-                cv2.polylines(image, [np.array(l).reshape((-1, 1, 2)).astype(np.int32)], False, i+1 if not DEBUG else lane_color_debug[i], 16 if not DEBUG else 2)
+            if len(l) > 1:
+                cv2.polylines(image, [np.array(l).reshape((-1, 1, 2)).astype(np.int32)], 
+                            False, i+1 if not debug else lane_color_debug[i], 16 if not debug else 2)
 
-        self.io_tasks.put(lambda: cv2.imwrite(f"camera_observations/{step_index}_lanes.png", image))
+        self.io_tasks.put(lambda: cv2.imwrite(
+                f"{folder}/{str(step_index)}.png",
+                (
+                    observation["image"].get()[..., -1]
+                    if env.config["image_on_cuda"]
+                    else observation["image"][..., -1]
+                )
+                * 255,
+            ))
+        self.io_tasks.put(lambda: cv2.imwrite(f"{folder}/{step_index}_lanes.png", image))
 
         return lane_coordinates

@@ -46,7 +46,7 @@ class PyTorchPipeline:
             CHECKPOINT=os.path.join(script_dir, '../erfnet_baseline_culane_20210204.pt').replace('\\','/')
         elif model == "resa":
             CONFIG=os.path.join(script_dir, 'attack/pytorch_auto_drive/configs/lane_detection/resa/resnet50_culane.py').replace('\\','/')
-            CHECKPOINT=os.path.join(script_dir, '../resnet50_resa_culane_20211016.pt').replace('\\','/')
+            CHECKPOINT=os.path.join(script_dir, '../model.pt').replace('\\','/')
         elif model == "scnn":
             CONFIG=os.path.join(script_dir, 'attack/pytorch_auto_drive/configs/lane_detection/scnn/resnet50_culane.py').replace('\\','/')
             CHECKPOINT=os.path.join(script_dir, '../resnet50_scnn_culane_20210311.pt').replace('\\','/')
