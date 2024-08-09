@@ -187,7 +187,7 @@ class PyTorchPipeline:
             'probmaps': results,
         }
         if return_model_input:
-            debug_info['model_input'] = model_in[0].cpu().numpy() if image_on_cuda else model_in[0]
+            debug_info['model_input'] = model_in[0].cpu().numpy().copy() if image_on_cuda else model_in[0]
 
         return off_center, lane_heading_theta, keypoints[0], debug_info
     

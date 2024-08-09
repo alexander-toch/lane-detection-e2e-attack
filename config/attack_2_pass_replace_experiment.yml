@@ -15,6 +15,6 @@ simulator_window_size:
 - 288
 policy: LaneDetectionPolicyE2E
 attack_config:
-  attack_at_meter: 30
+  attack_at_meter: 60
   two_pass_attack: true
   patch_color_replace: true

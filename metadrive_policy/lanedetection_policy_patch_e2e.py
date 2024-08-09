@@ -177,6 +177,9 @@ class LaneDetectionPolicyE2E(LaneDetectionPolicy):
                         # (H, W, C)
                         image[min_y:max_y, min_x:max_x] = patch
 
+                del white
+                del image_cpu
+
 
             offset_center, _, keypoints, debug_info = (
                 self.pipeline.infer_offset_center(image, (image_size[1], image_size[0]), self.control_object, image_on_cuda, self.ipm, return_model_input=generate_training_data) # important: swap image_size order
