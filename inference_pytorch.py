@@ -36,7 +36,7 @@ class DirtyRoadPatch:
     input_image_sizes: tuple = None
 
 class PyTorchPipeline:
-    def __init__(self, model_path=ONNX_MODEL_PATH, targeted=False, patch_size=(120,300), patch_location=(200,160), max_iterations=50, model="resa"):
+    def __init__(self, model_path=None, targeted=False, patch_size=(120,300), patch_location=(200,160), max_iterations=50, model="resa"):
         
         if model == "resnet50":
             CONFIG=os.path.join(script_dir, 'attack/pytorch_auto_drive/configs/lane_detection/baseline/resnet50_culane.py').replace('\\','/')
@@ -46,10 +46,13 @@ class PyTorchPipeline:
             CHECKPOINT=os.path.join(script_dir, '../erfnet_baseline_culane_20210204.pt').replace('\\','/')
         elif model == "resa":
             CONFIG=os.path.join(script_dir, 'attack/pytorch_auto_drive/configs/lane_detection/resa/resnet50_culane.py').replace('\\','/')
-            CHECKPOINT=os.path.join(script_dir, '../model.pt').replace('\\','/')
+            CHECKPOINT=os.path.join(script_dir, '../resnet50_resa_culane_20211016.pt').replace('\\','/')
         elif model == "scnn":
             CONFIG=os.path.join(script_dir, 'attack/pytorch_auto_drive/configs/lane_detection/scnn/resnet50_culane.py').replace('\\','/')
             CHECKPOINT=os.path.join(script_dir, '../resnet50_scnn_culane_20210311.pt').replace('\\','/')
+
+        if model_path is not None:
+            CHECKPOINT = os.path.join(script_dir, model_path).replace('\\','/')
 
         self.cfg = read_config(CONFIG) 
         self.model = MODELS.from_dict(self.cfg['model'])

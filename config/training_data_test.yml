@@ -1,0 +1,15 @@
+seed: 1235
+num_scenarios: 10
+map_config: SSC
+headless_rendering: false
+save_images: true
+max_steps: 400
+start_with_manual_control: false
+simulator_window_size:
+- 800
+- 288
+policy: LaneDetectionPolicyE2E
+attack_config: null
+use_lane_camera: false
+generate_training_data: true
+generate_training_data_interval: 10

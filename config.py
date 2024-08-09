@@ -1,5 +1,3 @@
-# ONNX_MODEL_PATH = "../resnet50_resa_tusimple_20211019.onnx"
-ONNX_MODEL_PATH = "../resnet50_resa_culane_20211016.onnx"
 BENCHMARK = False
 
 # input_sizes = (360, 640)    # tusimple

@@ -43,9 +43,11 @@ class LaneDetectionPolicyE2E(LaneDetectionPolicy):
         # print(f"Window size: {w}, {h}, Patch size (px): {self.patch_size}, location: {self.patch_location}")
 
         self.lane_detection_model = get_global_config()["lane_detection_model"]
+        model_path = get_global_config()["custom_model_path"]
         self.pipeline = PyTorchPipeline(targeted=True, patch_size=(self.patch_size[1], self.patch_size[0]), 
                                         max_iterations=get_global_config()["patch_geneneration_iterations"],
-                                        model=self.lane_detection_model)
+                                        model=self.lane_detection_model,
+                                        model_path=model_path)
 
     def io_worker(self):
         while not self.stop_event.isSet():

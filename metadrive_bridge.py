@@ -45,6 +45,7 @@ class Settings:
     save_probmaps: bool = False
     max_steps: int = 5000
     lane_detection_model: str = "resa"
+    custom_model_path: str | None = None
     patch_size_meters: tuple[float, float] = (1.0, 1.0) # (width, height) in meters
     patch_geneneration_iterations: int = 90
     start_with_manual_control: bool = False
@@ -208,6 +209,7 @@ class MetaDriveBridge:
             current_seed += 1
             env.engine.global_config["enable_dirty_road_patch_attack"] = False
             env.engine.get_policy(env.agent.name).control_object.engine.dirty_road_patch_object = None
+        self.process_training_data()
 
     def get_end_reason(self, info, step_index, steps):
         if info[TerminationState.SUCCESS] or info[TerminationState.MAX_STEP] or step_index >= self.settings.max_steps:
@@ -237,7 +239,6 @@ class MetaDriveBridge:
         step_index = 0
         offsets_center_simulator = []
 
-        # TODO: only get lanes if training data is generated
         if self.settings.generate_training_data:
             folder = f"./camera_observations/training_data/seed_{env.current_seed}"
             if not os.path.exists(folder):
@@ -320,6 +321,11 @@ class MetaDriveBridge:
                         step_index = 0
                         start_time = datetime.datetime.now()
                         env.current_track_agent.expert_takeover = not self.settings.start_with_manual_control
+                        if self.settings.generate_training_data:
+                            folder = f"./camera_observations/training_data/seed_{env.current_seed}"
+                            if not os.path.exists(folder):
+                                os.makedirs(folder)
+                            lanes = self.get_lanes_from_navigation_map(env)
                     else:
                         break 
             except KeyboardInterrupt as e:
@@ -411,6 +417,7 @@ class MetaDriveBridge:
 
         final_lanes = [[] for _ in range(self.settings.lanes_per_direction * 2 + 1)] # i.e. 5 lane lines in total including the middle line
 
+
         for cid, checkpoint in enumerate(checkpoints):
             for lane in all_lanes:
                 is_white = not MetaDriveType.is_yellow_line(lane["type"])
@@ -428,6 +435,9 @@ class MetaDriveBridge:
 
         # filter out zer length lanes
         final_lanes = list(filter(lambda lane: len(lane) > 1, final_lanes))
+
+        # sort the lane array by the y coord of the first point
+        final_lanes = sorted(final_lanes, key=lambda lane: lane[0][1], reverse=True)
 
         return final_lanes
 
@@ -447,7 +457,7 @@ class MetaDriveBridge:
         pos_meter = env.agent.position[0]
 
         # only consider points near the car
-        lane_color_debug = [(0, 255, 0), (0, 0, 255), (255, 0, 0), (255, 255, 0)] # TODO: add more colors if necessary
+        lane_color_debug = [(255, 255, 255), (200, 200, 200), (150, 150, 150), (100, 100, 100)] # add more colors if necessary
         lanes_filtered = map(lambda lane: 
                             list(filter(lambda x: x[0] >= pos_meter - 20, lane))[:120], lanes)
 
