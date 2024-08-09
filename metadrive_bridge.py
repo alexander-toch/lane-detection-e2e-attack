@@ -143,6 +143,7 @@ class MetaDriveBridge:
             patch_geneneration_iterations=self.settings.patch_geneneration_iterations,
             patch_color_replace=self.settings.attack_config.patch_color_replace if self.settings.attack_config is not None else False,
             lane_detection_model=self.settings.lane_detection_model,
+            custom_model_path=self.settings.custom_model_path,
             generate_training_data=self.settings.generate_training_data,
             decision_repeat=1,
             preload_models=False,
@@ -377,7 +378,10 @@ class MetaDriveBridge:
             os.makedirs(labels_root)
             os.makedirs(list_root)
 
+        entries = []
         train = []
+        test = []
+        val = []
 
         for gt in glob.glob("./camera_observations/training_data/seed_*/*.txt"):
             seed = gt.replace("\\", "/").split("/")[-1].split(".")[0]
@@ -394,10 +398,21 @@ class MetaDriveBridge:
                     step = f"{cam_path.split('/')[-1].split('_')[0]}.png"
                     shutil.copyfile(f"{data_root}/{cam_path}", f"{root}/{seed}/{step}.png")
                     shutil.copyfile(f"{data_root}/{lane_path}", f"{labels_root}/{seed}/{step}.png")
-                    train.append(f"{seed}/{step} {' '.join(lanes_existence)}")
+                    entries.append(f"{seed}/{step} {' '.join(lanes_existence)}")
+
+        # make a 66/8/26 split for the entries
+        train = entries[:int(len(entries) * 0.66)]
+        test = entries[int(len(entries) * 0.66):int(len(entries) * 0.74)]
+        val = entries[int(len(entries) * 0.74):]
 
         with open(f"{list_root}/train.txt", "w") as f:
             f.write("\n".join(train))
+
+        with open(f"{list_root}/test.txt", "w") as f:
+            f.write("\n".join(test))
+
+        with open(f"{list_root}/valfast.txt", "w") as f:
+            f.write("\n".join(val))
         
         print("Training data processed.")
 

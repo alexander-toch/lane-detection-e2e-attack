@@ -5,6 +5,8 @@ headless_rendering: false
 save_images: true
 max_steps: 5000
 start_with_manual_control: false
+lane_detection_model: resa
+custom_model_path: "../resnet50_resa_culane_custom_20240809.pt"
 simulator_window_size:
 - 800
 - 288
