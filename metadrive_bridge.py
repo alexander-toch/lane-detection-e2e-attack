@@ -36,6 +36,7 @@ class AttackConfig:
     two_pass_attack: bool = False
     place_patch_in_image_stream: bool = False
     patch_color_replace: bool = False
+    load_patch_from_file: bool = False
 
 @dataclass
 class Settings:
@@ -202,7 +203,21 @@ class MetaDriveBridge:
             env.start_seed = current_seed
             env.start_index = current_seed
             env.num_scenarios = 1
-            self.run_simulation(env)
+
+            pkl_path = f"./camera_observations/training_data/{self.settings.lane_detection_model}_seed_{current_seed}/patch_object.pkl"
+            if not self.settings.attack_config.load_patch_from_file:
+                self.run_simulation(env)
+            else:
+                if not os.path.exists(pkl_path):
+                    current_seed += 1
+                    print(f"Pass 1+2 skipped due to no patch file found for seed {current_seed}.")
+                    continue
+                with open(pkl_path, 'rb') as f:
+                    obj = pickle.load(f)
+                env.reset(env.start_seed)
+                env.engine.get_policy(env.agent.name).control_object.engine.dirty_road_patch_object = obj
+                print(f"Pass 1 skipped and patch loaded from file for seed {current_seed}.")
+
 
             # ATTACK PASS 2: Drive with mounted patch
             print(f"Pass 2: Running simulation with seed {current_seed} with attack enabled.")
@@ -342,6 +357,8 @@ class MetaDriveBridge:
                             lanes = self.get_lanes_from_navigation_map(env)
                     else:
                         break 
+                    
+                    gc.collect()
             except KeyboardInterrupt as e:
                 raise e
             except Exception:
@@ -368,10 +385,10 @@ class MetaDriveBridge:
 
                 import traceback
                 print(traceback.format_exc())
+                gc.collect()
                 break
             
             step_index += 1
-            gc.collect()
 
     def io_worker(self):
         while not self.stop_event.isSet():
@@ -395,7 +412,6 @@ class MetaDriveBridge:
         entries = []
         train = []
         test = []
-        val = []
 
         for gt in glob.glob("./camera_observations/training_data/*_seed_*/*.txt"):
             # TODO: read model name from the file
@@ -410,17 +426,19 @@ class MetaDriveBridge:
                 lines = f.readlines()
                 for line in lines:
                     cam_path, lane_path, *lanes_existence = line.strip().split(" ")
-                    step = f"{cam_path.split('/')[-1].split('_')[0]}.png"
+                    step = f"{cam_path.split('/')[-1].split('.')[0]}"
                     shutil.copyfile(f"{data_root}/{cam_path}", f"{root}/{seed}/{step}.png")
                     shutil.copyfile(f"{data_root}/{lane_path}", f"{labels_root}/{seed}/{step}.png")
                     entries.append(f"{seed}/{step} {' '.join(lanes_existence)}")
 
-        # make a 66/8/26 split for the entries (shuffled)
+        # make a 70/30 train/test split for the entries (shuffled)
         import random
-        entries = random.shuffle(entries)
-        train = entries[:int(len(entries) * 0.66)]
-        test = entries[int(len(entries) * 0.66):int(len(entries) * 0.74)]
-        val = entries[int(len(entries) * 0.74):]
+        random.shuffle(entries)
+        train = entries[:int(len(entries) * 0.7)]
+        test = entries[int(len(entries) * 0.7):]
+
+        # test format is different
+        test = list(map(lambda x: f"{x.split(' ')[0]}", test))
 
         with open(f"{list_root}/train.txt", "w") as f:
             f.write("\n".join(train))
@@ -428,8 +446,9 @@ class MetaDriveBridge:
         with open(f"{list_root}/test.txt", "w") as f:
             f.write("\n".join(test))
 
+        # valfast.txt is used for IoU eval
         with open(f"{list_root}/valfast.txt", "w") as f:
-            f.write("\n".join(val))
+            f.write("\n".join(test))
         
         print("Training data processed.")
 

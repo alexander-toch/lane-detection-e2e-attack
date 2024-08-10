@@ -3,6 +3,7 @@ num_scenarios: 100
 map_config: SSS
 headless_rendering: false
 save_images: true
+save_probmaps: true
 max_steps: 5000
 start_with_manual_control: false
 lane_detection_model: resa
