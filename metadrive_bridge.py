@@ -9,7 +9,6 @@ from enum import Enum
 from dataclasses import dataclass, field
 import queue
 import threading
-import functools
 import cv2
 import numpy as np
 from metadrive import MetaDriveEnv, constants
@@ -185,7 +184,8 @@ class MetaDriveBridge:
             self.run_simulation(env, generate_training_data=self.settings.generate_training_data)
 
         self.database.finish_experiment(self.experiment_id, datetime.datetime.now())
-        self.process_training_data()
+        if self.settings.generate_training_data:
+            self.process_training_data()
 
     def run_two_pass_attack(self):
         self.cleanup()
@@ -235,7 +235,6 @@ class MetaDriveBridge:
             current_seed += 1
             env.engine.global_config["enable_dirty_road_patch_attack"] = False
             env.engine.get_policy(env.agent.name).control_object.engine.dirty_road_patch_object = None
-        self.process_training_data()
 
     def get_end_reason(self, info, step_index, steps):
         if info[TerminationState.SUCCESS] or info[TerminationState.MAX_STEP] or step_index >= self.settings.max_steps:
@@ -347,6 +346,7 @@ class MetaDriveBridge:
 
                     if env.current_seed + 1 < env.start_seed + env.num_scenarios:   
                         env.reset(env.current_seed + 1)
+                        gc.collect()
                         step_index = 0
                         start_time = datetime.datetime.now()
                         env.current_track_agent.expert_takeover = not self.settings.start_with_manual_control
@@ -357,8 +357,7 @@ class MetaDriveBridge:
                             lanes = self.get_lanes_from_navigation_map(env)
                     else:
                         break 
-                    
-                    gc.collect()
+
             except KeyboardInterrupt as e:
                 raise e
             except Exception:

@@ -125,6 +125,7 @@ class LaneDetectionPolicyE2E(LaneDetectionPolicy):
         patch_object = None
         current_car_pos_meter = self.control_object.origin.getPos()[0] # FIXME: this only works for straight roads, use navigation.travelled_length ?
         current_car_center_offset = self.control_object.dist_to_center
+        patch_replace_visible_in_frame = None
 
         if (not place_patch_in_image_stream and int(current_car_pos_meter) == attack_at_meter and self.control_object.engine.dirty_road_patch_object is None) or \
             (place_patch_in_image_stream and attack_active and int(current_car_pos_meter) >= attack_at_meter):
@@ -158,6 +159,7 @@ class LaneDetectionPolicyE2E(LaneDetectionPolicy):
                 )
         else: 
             if attack_active and get_global_config()["patch_color_replace"]:
+                patch_replace_visible_in_frame = False
                 # find white pixels
                 image_cpu = image.get() * 255 if image_on_cuda else image
                 white = np.where(np.all(image_cpu == [255, 255, 255], axis=-1))
@@ -176,6 +178,7 @@ class LaneDetectionPolicyE2E(LaneDetectionPolicy):
                         # fill area with patch
                         # (H, W, C)
                         image[min_y:max_y, min_x:max_x] = patch
+                        patch_replace_visible_in_frame = True
 
                 del white
                 del image_cpu
@@ -216,6 +219,7 @@ class LaneDetectionPolicyE2E(LaneDetectionPolicy):
             "speed": self.control_object.speed_km_h,
             "throttle_brake": self.control_object.throttle_brake,
             "model_input": debug_info["model_input"] if "model_input" in debug_info else None,
+            "patch_replace_visible_in_frame": patch_replace_visible_in_frame,
         })
 
         # TODO: add a flag to enable image saving and interval
