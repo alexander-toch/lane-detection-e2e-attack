@@ -1,4 +1,4 @@
-seed: 2000
+seed: 4000
 num_scenarios: 20
 map_config: SSC
 headless_rendering: false
@@ -7,7 +7,7 @@ max_steps: 400
 start_with_manual_control: false
 patch_geneneration_iterations: 500
 save_probmaps: true
-lane_detection_model: resnet50
+lane_detection_model: scnn
 patch_size_meters:
 - 1.0
 - 1.0
@@ -15,7 +15,7 @@ simulator_window_size:
 - 800
 - 288
 policy: LaneDetectionPolicyE2E
-custom_model_path: "../resnet50_baseline_culane_custom_20240812.pt"
+custom_model_path: "../resnet50_scnn_culane_custom_20240812.pt"
 attack_config:
   attack_at_meter: 60
   two_pass_attack: true

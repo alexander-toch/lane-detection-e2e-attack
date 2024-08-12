@@ -531,6 +531,8 @@ class MetaDriveBridge:
         self.train_ground_truth.append(
             f"{self.settings.lane_detection_model}_seed_{env.current_seed}/{step_index}.png {self.settings.lane_detection_model}_seed_{env.current_seed}/{step_index}_lanes.png {' '.join(existence)}"
         )
+        
+        self.io_tasks.put(lambda: pickle.dump({"lane_coordinates": lane_coordinates, "existence": existence}, open(f"{folder}/{str(step_index)}_lanes.pkl", "wb")))
 
         for i, l in enumerate(lane_coordinates):
             if len(l) > 1:
