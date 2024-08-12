@@ -535,7 +535,7 @@ class MetaDriveBridge:
         for i, l in enumerate(lane_coordinates):
             if len(l) > 1:
                 cv2.polylines(image, [np.array(l).reshape((-1, 1, 2)).astype(np.int32)], 
-                            False, i+1 if not debug else lane_color_debug[i], 16 if not debug else 2)
+                            False, i+1 if not debug else lane_color_debug[i], 8 if not debug else 2)
                 
         if model_input is not None:
             image_in = model_input.transpose((1, 2, 0))
