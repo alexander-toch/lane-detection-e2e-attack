@@ -1,13 +1,13 @@
 seed: 1235
 num_scenarios: 100
-map_config: SSS
+map_config: SCC
 headless_rendering: false
 save_images: true
 save_probmaps: true
 max_steps: 5000
 start_with_manual_control: false
 lane_detection_model: erfnet
-custom_model_path: "../resnet50_erfnet_culane_custom_20240812.pt"
+custom_model_path: "../erfnet_baseline_culane_custom_20240813.pt"
 simulator_window_size:
 - 800
 - 288

@@ -9,9 +9,6 @@ patch_geneneration_iterations: 250
 save_probmaps: false
 generate_training_data: true
 lane_detection_model: erfnet
-patch_size_meters:
-- 1.0
-- 1.0
 simulator_window_size:
 - 800
 - 288
@@ -20,4 +17,4 @@ attack_config:
   attack_at_meter: 60
   two_pass_attack: true
   patch_color_replace: true
-  load_patch_from_file: false
+  load_patch_from_file: true

@@ -20,4 +20,4 @@ attack_config:
   attack_at_meter: 60
   two_pass_attack: true
   patch_color_replace: true
-  load_patch_from_file: false
+  load_patch_from_file: true

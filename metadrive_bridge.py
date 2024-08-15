@@ -184,8 +184,10 @@ class MetaDriveBridge:
             self.run_simulation(env, generate_training_data=self.settings.generate_training_data)
 
         self.database.finish_experiment(self.experiment_id, datetime.datetime.now())
-        if self.settings.generate_training_data:
-            self.process_training_data()
+
+        # wait for io tasks to finish
+        while not self.io_tasks.empty():
+            pass
 
     def run_two_pass_attack(self):
         self.cleanup()
@@ -204,13 +206,13 @@ class MetaDriveBridge:
             env.start_index = current_seed
             env.num_scenarios = 1
 
-            pkl_path = f"./camera_observations/training_data/{self.settings.lane_detection_model}_seed_{current_seed}/patch_object.pkl"
             if not self.settings.attack_config.load_patch_from_file:
                 self.run_simulation(env)
             else:
+                pkl_path = f"./camera_observations/training_data/{self.settings.lane_detection_model}_seed_{current_seed}/patch_object.pkl"
                 if not os.path.exists(pkl_path):
-                    current_seed += 1
                     print(f"Pass 1+2 skipped due to no patch file found for seed {current_seed}.")
+                    current_seed += 1
                     continue
                 with open(pkl_path, 'rb') as f:
                     obj = pickle.load(f)
@@ -236,8 +238,8 @@ class MetaDriveBridge:
             env.engine.global_config["enable_dirty_road_patch_attack"] = False
             env.engine.get_policy(env.agent.name).control_object.engine.dirty_road_patch_object = None
 
-    def get_end_reason(self, info, step_index, steps):
-        if info[TerminationState.SUCCESS] or info[TerminationState.MAX_STEP] or step_index >= self.settings.max_steps:
+    def get_end_reason(self, info, step_index, steps, early_exit=False):
+        if info[TerminationState.SUCCESS] or info[TerminationState.MAX_STEP] or step_index >= self.settings.max_steps or early_exit:
             last_steps_to_check = 20 if len(steps) > 10 else max(int(len(steps) / 10), 1)
             if len(list(filter(lambda x: x["offset_center"] is None, steps[-last_steps_to_check:]))) / last_steps_to_check >= 0.5:
                 return "NO_LANES_DETECTED"
@@ -262,6 +264,8 @@ class MetaDriveBridge:
 
         start_time = datetime.datetime.now()
         step_index = 0
+        no_move_count = 0
+        current_car_pos_meter = 0
         offsets_center_simulator = []
 
         if generate_training_data:
@@ -307,6 +311,12 @@ class MetaDriveBridge:
                             ))
 
                 policy = env.engine.get_policy(env.agent.name)
+
+                if env.agent.position[0] - current_car_pos_meter < 0.01:
+                    no_move_count += 1
+                else:
+                    no_move_count = 0
+
                 current_car_pos_meter = env.agent.position[0]
 
                 # Used for calculation of E2E-LD metric
@@ -319,8 +329,8 @@ class MetaDriveBridge:
                     self.generate_training_label(lanes, env, step_index, o, model_input)
                     del model_input
 
-                if tm or tc or step_index >= self.settings.max_steps: 
-                    end_reason = self.get_end_reason(info, step_index, policy.step_infos)
+                if tm or tc or step_index >= self.settings.max_steps or no_move_count > 50: 
+                    end_reason = self.get_end_reason(info, step_index, policy.step_infos, no_move_count > 50)
                     if generate_training_data and len(self.train_ground_truth) > 0:
                         with open(f"{folder}/{env.current_seed}.txt", "w") as f:
                             f.write("\n".join(self.train_ground_truth))
@@ -426,7 +436,7 @@ class MetaDriveBridge:
                 for line in lines:
                     cam_path, lane_path, *lanes_existence = line.strip().split(" ")
                     step = f"{cam_path.split('/')[-1].split('.')[0]}"
-                    shutil.copyfile(f"{data_root}/{cam_path}", f"{root}/{seed}/{step}.png")
+                    shutil.copyfile(f"{data_root}/{cam_path}", f"{root}/{seed}/{step}.exr")
                     shutil.copyfile(f"{data_root}/{lane_path}", f"{labels_root}/{seed}/{step}.png")
                     entries.append(f"{seed}/{step} {' '.join(lanes_existence)}")
 
@@ -514,22 +524,34 @@ class MetaDriveBridge:
         for i, lane_points in enumerate(lanes_filtered):
             if not len(lane_points):
                 continue
+            
+            added_outside_bottom = False
+            added_outside_top = False
 
             for point in lane_points:
                 projected_point = Point2()
-                if lens.project(cam.getRelativePoint(env.engine.render, Point3(point[0], point[1], 0)), projected_point):
-                    # Map the projected point into clip space (image center is (0, 0))
-                    p_image = [
-                        (projected_point[0] * (image_width / 2)) + (image_width / 2),  # X coordinate: scale and shift
-                        (image_height / 2) - (projected_point[1] * (image_height / 2))  # Y coordinate: scale and shift (flip Y axis)
-                    ]
-                    lane_coordinates[i].extend(p_image)
+
+                lens.project(cam.getRelativePoint(env.engine.render, Point3(point[0], point[1], 0)), projected_point)
+
+                p_image = [
+                    (projected_point[0] * (image_width / 2)) + (image_width / 2),  # X coordinate: scale and shift
+                    (image_height / 2) - (projected_point[1] * (image_height / 2))  # Y coordinate: scale and shift (flip Y axis)
+                ]
+                if p_image[1] >= image_height/2:
+                    if p_image[1] >= image_height and not added_outside_bottom or p_image[0] <= 0:
+                        added_outside_bottom = True
+                        lane_coordinates[i].extend(p_image)
+                    elif p_image[0] >= image_width and not added_outside_top:
+                        added_outside_top = True
+                        lane_coordinates[i].extend(p_image)
+                    else:
+                        lane_coordinates[i].extend(p_image)
 
         # sort by mean x coordinate
         folder = f"./camera_observations/training_data/{self.settings.lane_detection_model}_seed_{env.current_seed}"
         existence = ["1" if len(l) > 1 else "0" for l in lane_coordinates]
         self.train_ground_truth.append(
-            f"{self.settings.lane_detection_model}_seed_{env.current_seed}/{step_index}.png {self.settings.lane_detection_model}_seed_{env.current_seed}/{step_index}_lanes.png {' '.join(existence)}"
+            f"{self.settings.lane_detection_model}_seed_{env.current_seed}/{step_index}.exr {self.settings.lane_detection_model}_seed_{env.current_seed}/{step_index}_lanes.png {' '.join(existence)}"
         )
         
         self.io_tasks.put(lambda: pickle.dump({"lane_coordinates": lane_coordinates, "existence": existence}, open(f"{folder}/{str(step_index)}_lanes.pkl", "wb")))
@@ -537,16 +559,14 @@ class MetaDriveBridge:
         for i, l in enumerate(lane_coordinates):
             if len(l) > 1:
                 cv2.polylines(image, [np.array(l).reshape((-1, 1, 2)).astype(np.int32)], 
-                            False, i+1 if not debug else lane_color_debug[i], 8 if not debug else 2)
+                            False, i+1 if not debug else lane_color_debug[i], 7 if not debug else 2, lineType=cv2.LINE_AA)
                 
         if model_input is not None:
             image_in = model_input.transpose((1, 2, 0))
-            image_in = np.clip(image_in, 0, 1)
-            image_in = (image_in * 255).astype(np.uint8)
         else:
             image_in =  (observation["image"].get()[..., -1] if env.config["image_on_cuda"] else observation["image"][..., -1]) * 255
 
-        self.io_tasks.put(lambda: cv2.imwrite(f"{folder}/{str(step_index)}.png", image_in))
+        self.io_tasks.put(lambda: cv2.imwrite(f"{folder}/{str(step_index)}.exr", image_in))
         self.io_tasks.put(lambda: cv2.imwrite(f"{folder}/{step_index}_lanes.png", image))
 
         return lane_coordinates
