@@ -10,6 +10,7 @@ import cupy as cp
 import matplotlib.pyplot as plt
 import sys, os
 import torch
+from cupyx.scipy.ndimage import gaussian_filter
 
 from metadrive_policy.lanedetection_policy_dpatch import LaneDetectionPolicy
 from metadrive.obs.image_obs import ImageObservation
@@ -179,6 +180,33 @@ class LaneDetectionPolicyE2E(LaneDetectionPolicy):
                         # (H, W, C)
                         image[min_y:max_y, min_x:max_x] = patch
                         patch_replace_visible_in_frame = True
+
+                if get_global_config()["use_blur_defense"]:
+                    blurred_image = cp.zeros_like(image)
+                    for c in range(image.shape[2]):
+                        blurred_image[:, :, c] = gaussian_filter(image[:, :, c], sigma=1.5)
+                    image = blurred_image
+
+                # TODO: add more defenses
+                if False and get_global_config()["use_gaussian_noise_defense"]:
+                    noise = cp.random.normal(0, 0.1, image.shape)
+                    image += noise
+                    image = cp.clip(image, 0, 1)
+
+                if False and get_global_config()["use_jpeg_defense"]:
+                    image = cp.asnumpy(image)
+                    image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+                    _, encimg = cv2.imencode(".jpg", image, [int(cv2.IMWRITE_JPEG_QUALITY), 50])
+                    image = cv2.imdecode(encimg, 1)
+                    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+                    image = cp.asarray(image)
+
+                if False:
+                    from art.defences.preprocessor.jpeg_compression import JpegCompression
+                    jpeg = JpegCompression(quality=50)
+                    
+                    image = cp.asnumpy(image)
+                    image = jpeg._compress(image, mode="RGB")
 
                 del white
                 del image_cpu
