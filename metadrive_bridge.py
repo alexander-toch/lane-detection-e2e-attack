@@ -36,7 +36,7 @@ class AttackConfig:
     place_patch_in_image_stream: bool = False
     patch_color_replace: bool = False
     load_patch_from_file: bool = False
-    use_blur_defense: bool = False
+    defense: None | str = None
 
 @dataclass
 class Settings:
@@ -105,6 +105,7 @@ class MetaDriveBridge:
                     self.attack_type = AttackType.onePassSimple
 
         self.experiment_id = self.database.add_experiment(datetime.datetime.now(), None, self.attack_type, self.settings.num_scenarios)
+        print(f"\n--- Experiment ID: {self.experiment_id} ---\n")
         self.train_ground_truth = []
 
         self.policy = LaneDetectionPolicyE2E if self.settings.policy == "LaneDetectionPolicyE2E" else LaneDetectionPolicy
@@ -145,7 +146,7 @@ class MetaDriveBridge:
             place_patch_in_image_stream=self.settings.attack_config.place_patch_in_image_stream if self.settings.attack_config is not None else False,
             patch_geneneration_iterations=self.settings.patch_geneneration_iterations,
             patch_color_replace=self.settings.attack_config.patch_color_replace if self.settings.attack_config is not None else False,
-            use_blur_defense=self.settings.attack_config.use_blur_defense if self.settings.attack_config is not None else False,
+            defense=self.settings.attack_config.defense if self.settings.attack_config is not None else None,
             lane_detection_model=self.settings.lane_detection_model,
             custom_model_path=self.settings.custom_model_path,
             generate_training_data=self.settings.generate_training_data,

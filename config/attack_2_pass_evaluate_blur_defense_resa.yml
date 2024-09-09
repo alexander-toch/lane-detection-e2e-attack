@@ -1,5 +1,5 @@
 seed: 1000
-num_scenarios: 20
+num_scenarios: 50
 map_config: SSC
 headless_rendering: false
 save_images: true
@@ -20,4 +20,4 @@ attack_config:
   two_pass_attack: true
   patch_color_replace: true
   load_patch_from_file: true
-  use_blur_defense: true
+  defense: "gaussian_blur"

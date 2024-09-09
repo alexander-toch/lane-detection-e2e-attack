@@ -5,7 +5,7 @@ headless_rendering: false
 save_images: true
 max_steps: 400
 start_with_manual_control: false
-patch_geneneration_iterations: 500
+patch_geneneration_iterations: 250
 save_probmaps: true
 patch_size_meters:
 - 1.0
@@ -19,4 +19,4 @@ attack_config:
   attack_at_meter: 60
   two_pass_attack: true
   patch_color_replace: true
-  load_patch_from_file: true
+  load_patch_from_file: false

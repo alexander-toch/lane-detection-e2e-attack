@@ -5,7 +5,7 @@ headless_rendering: false
 save_images: false
 max_steps: 400
 start_with_manual_control: false
-patch_geneneration_iterations: 250
+patch_geneneration_iterations: 400
 save_probmaps: false
 generate_training_data: true
 lane_detection_model: resnet50
@@ -20,4 +20,4 @@ attack_config:
   attack_at_meter: 60
   two_pass_attack: true
   patch_color_replace: true
-  load_patch_from_file: true
+  load_patch_from_file: false
